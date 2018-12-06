@@ -25,12 +25,13 @@ This repo contains useful steps to install Knative, test app on Knative and unde
 1. Install istio
 ```
 kubectl apply -f istio.yaml
+kubectl label namespace default istio-injection=enabled
 # Check pods are running
 kubectl get pods -n istio-system
 ```
 2. Install build and serving
 ```
-kubectl apply -f serving-release.yaml
+kubectl apply -f serving-release-0.2.2.yaml
 # Check pods are running
 kubectl get pods -n knative-serving
 kubectl get pods -n knative-build
@@ -79,3 +80,54 @@ kubectl delete -f builder.yaml
 kubectl delete -f docker-secret.yaml
 kubectl delete -f kaniko.yaml
 ```
+
+5. Eventing trial
+```
+#Install
+kubectl apply -f eventing-release-0.2.0.yaml
+#Install three eventsource type
+kubectl apply -f eventing-eventsource-0.2.0.yaml
+
+#Github samples
+#Create a github-message-dumper service
+kubectl apply -f ./github-event-sample/service.yaml
+kubectl apply -f ./github-event-sample/githubsecret.yaml
+kubectl apply -f ./github-event-sample/github-source.yaml
+```
+
+6. Logging, monitoring and metrics
+**Note** If you are using IKS, add below mountPath and hostPath to DaemonSet `fluentd-ds`
+```
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluentd-ds
+  namespace: knative-monitoring
+spec:
+  template:
+    spec:
+      containers:
+        volumeMounts:
+        - mountPath: /var/data/cripersistentstorage
+          name: persistentstorage
+          readOnly: true
+      volumes:
+      - hostPath:
+          path: /var/data/cripersistentstorage
+        name: persistentstorage
+```
+Then
+```
+# Label node to start Fluentd DaemonSet
+kubectl label nodes --all beta.kubernetes.io/fluentd-ds-ready="true"
+# check
+kubectl get daemonset fluentd-ds --namespace knative-monitoring
+# start proxy
+kubectl proxy
+# start a local proxy of Grafana
+kubectl port-forward --namespace knative-monitoring $(kubectl get pods --namespace knative-monitoring --selector=app=grafana --output=jsonpath="{.items..metadata.name}") 3000
+```
+
++ Visit [Kibana UI](http://localhost:8001/api/v1/namespaces/knative-monitoring/services/kibana-logging/proxy/app/kibana) to get logs.
++ Visit [Zipkin](http://localhost:8001/api/v1/namespaces/istio-system/services/zipkin:9411/proxy/zipkin/) to get trace.
++ Visit [Grafana](http://localhost:3000) to get metrics.
