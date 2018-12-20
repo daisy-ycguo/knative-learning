@@ -42,16 +42,12 @@ kubectl apply -f service.yaml
 # Check your pod is running
 kubectl get Pods
 
-# Get ip address of istio-ingressgateway
-kubectl get pods -n istio-system -o wide | grep "istio-ingressgateway"
-# Get port
-echo $(kubectl get svc knative-ingressgateway -n istio-system   -o 'jsonpath={.spec.ports[?(@.port==80)].nodePort}')
-# Get the public IP for the private IP if you are using a public cloud
-export IP_ADDRESS=<your public ip>:<port>
+# Get the public IP of knative-ingressgateway
+export SERVICE_IP=`kubectl get svc knative-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
 # Get url
 export HOST_URL=$(kubectl get services.serving.knative.dev helloworld-go  -o jsonpath='{.status.domain}')
 # Test your app
-curl -H "Host: ${HOST_URL}" http://${IP_ADDRESS}
+curl -H "Host: ${HOST_URL}" http://${SERVICE_IP}
 
 # Delete your deployment
 kubectl delete -f service.yaml
@@ -96,6 +92,7 @@ kubectl apply -f ./github-event-sample/github-source.yaml
 ```
 
 6. Logging, monitoring and metrics
+#### Set up
 **Note** If you are using IKS, add below mountPath and hostPath to DaemonSet `fluentd-ds`
 ```
 apiVersion: apps/v1
@@ -128,6 +125,26 @@ kubectl proxy
 kubectl port-forward --namespace knative-monitoring $(kubectl get pods --namespace knative-monitoring --selector=app=grafana --output=jsonpath="{.items..metadata.name}") 3000
 ```
 
+#### Sample app: telemetry-go
+Use `telemetry-go` as the sample app.
+```
+# Build docker image
+cd $GOPATH/src/github.com/knative/docs
+docker build \
+  --tag "daisyycguo/knative-telemetry" \
+  --file=serving/samples/telemetry-go/Dockerfile .
+docker push daisyycguo/knative-telemetry
+```
+
 + Visit [Kibana UI](http://localhost:8001/api/v1/namespaces/knative-monitoring/services/kibana-logging/proxy/app/kibana) to get logs.
 + Visit [Zipkin](http://localhost:8001/api/v1/namespaces/istio-system/services/zipkin:9411/proxy/zipkin/) to get trace.
 + Visit [Grafana](http://localhost:3000) to get metrics.
+
+### Sample app: blue/green deployment
+
+## Appendix
+Open prometheus Web UI:
+```
+kubectl -n knative-monitoring port-forward $(kubectl -n knative-monitoring get pod -l app=prometheus -o jsonpath="{.items[0].metadata.name}") 9090
+```
+kubectl port-forward $(kubectl get pods --selector=app=prometheus-test --output=jsonpath="{.items[0].metadata.name}") 9090
