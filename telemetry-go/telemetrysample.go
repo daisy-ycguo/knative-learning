@@ -244,7 +244,7 @@ func logHandler(client *http.Client) http.HandlerFunc {
 		fmt.Fprintln(os.Stdout, string(jsonOutput))
 
 		// Send logs to /var/log
-		fileName := "/var/log/test/sample.log"
+		fileName := "/var/log/sample.log"
 		f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		defer f.Close()
 

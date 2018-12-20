@@ -43,11 +43,11 @@ kubectl apply -f service.yaml
 kubectl get Pods
 
 # Get the public IP of knative-ingressgateway
-export SERVICE_IP=`kubectl get svc knative-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
+export KINGRESS_IP=`kubectl get svc knative-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
 # Get url
-export HOST_URL=$(kubectl get services.serving.knative.dev helloworld-go  -o jsonpath='{.status.domain}')
+export HELLOWORLD_URL=$(kubectl get services.serving.knative.dev helloworld-go  -o jsonpath='{.status.domain}')
 # Test your app
-curl -H "Host: ${HOST_URL}" http://${SERVICE_IP}
+curl -H "Host: ${HELLOWORLD_URL}" http://${KINGRESS_IP}
 
 # Delete your deployment
 kubectl delete -f service.yaml
@@ -142,13 +142,14 @@ export TELEMETRY_HOST=`kubectl get route telemetrysample-route --output jsonpath
 curl -H "Host:$TELEMETRY_HOST" http://${KINGRESS_IP}
 curl -H "Host:$TELEMETRY_HOST" http://${KINGRESS_IP}/log
 
-# Logging
+# Exporting
 kubectl proxy
 kubectl -n knative-monitoring port-forward $(kubectl -n knative-monitoring get pod -l app=prometheus -o jsonpath="{.items[0].metadata.name}") 9090
+kubectl port-forward --namespace knative-monitoring $(kubectl get pods --namespace knative-monitoring --selector=app=grafana --output=jsonpath="{.items..metadata.name}") 3000
 ```
-+ Visit [Kibana UI](http://localhost:8001/api/v1/namespaces/knative-monitoring/services/kibana-logging/proxy/app/kibana) to get logs.
++ Visit [Kibana UI](http://localhost:8001/api/v1/namespaces/knative-monitoring/services/kibana-logging/proxy/app/kibana) to get logs. Use `kubernetes.labels.serving_knative_dev\/revision: : "telemetrysample-configuration-00001"` to search logs of this revision. Use `kubernetes.labels.serving_knative_dev\/configuration: "telemetrysample-configuration"` to search logs of this configuration.
 + Visit [Zipkin](http://localhost:8001/api/v1/namespaces/istio-system/services/zipkin:9411/proxy/zipkin/) to get trace.
-+ Visit [Prometheus UI](http://localhost:9090) to get metrics
++ Visit [Prometheus UI](http://localhost:9090) to get metrics. Use `istio_revision_request_duration_sum{destination_configuration="telemetrysample-configuration"}` and `istio_revision_request_count{destination_configuration="telemetrysample-configuration"}` to search metrics.
 + Visit [Grafana](http://localhost:3000) to get metrics.
 
 ```
