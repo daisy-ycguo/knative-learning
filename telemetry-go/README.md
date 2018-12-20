@@ -125,7 +125,7 @@ To access this service via `curl`, you need to determine its ingress address.
 variables:
 ```
 export SERVICE_HOST=`kubectl get route telemetrysample-route --output jsonpath="{.status.domain}"`
-export SERVICE_IP=`kubectl get svc knative-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
+export KINGRESS_IP=`kubectl get svc knative-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
 ```
 
 3. Make a request to the service to see the `Hello World!` message:

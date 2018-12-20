@@ -21,19 +21,20 @@
 
 This document describe the insights of Knative
 
-## Describe a service pod
-A service pod contains 1 init container `docker.io/istio/proxy_init` and 4 containers:
+## Describe a user service pod
+A user service pod contains 1 init container `docker.io/istio/proxy_init` and 4 containers:
 - user-container: the container with user codes;
 - queue-proxy: Knative Serving owned sidecar container to enforce request concurrency limits, image of `gcr.io/knative-releases/github.com/knative/serving/cmd/queue@sha256`;
 - fluentd-proxy: Sidecar container to collect logs from /var/log, image `k8s.gcr.io/fluentd-elasticsearch`;
 - istio-proxy: Sidecar container to form an Istio mesh, image `docker.io/istio/proxyv2:1.0.2`, running `pilot-agent` and `envoy`.
 
-## Two kinds of `knative.dev/type`
+## Three kinds of `knative.dev/type` till now
 - app: long running service
-
 - function: function as a service
+- container：container as a service
 
-##
+## A user service contains:
+- a
 
 helloworld-go
 ```

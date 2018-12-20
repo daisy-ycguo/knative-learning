@@ -134,13 +134,57 @@ docker build \
   --tag "daisyycguo/knative-telemetry" \
   --file=serving/samples/telemetry-go/Dockerfile .
 docker push daisyycguo/knative-telemetry
-```
 
+# Apply
+kubectl apply -f ./telemetry-go/
+export KINGRESS_IP=`kubectl get svc knative-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
+export TELEMETRY_HOST=`kubectl get route telemetrysample-route --output jsonpath="{.status.domain}"`
+curl -H "Host:$TELEMETRY_HOST" http://${KINGRESS_IP}
+curl -H "Host:$TELEMETRY_HOST" http://${KINGRESS_IP}/log
+
+# Logging
+kubectl proxy
+kubectl -n knative-monitoring port-forward $(kubectl -n knative-monitoring get pod -l app=prometheus -o jsonpath="{.items[0].metadata.name}") 9090
+```
 + Visit [Kibana UI](http://localhost:8001/api/v1/namespaces/knative-monitoring/services/kibana-logging/proxy/app/kibana) to get logs.
 + Visit [Zipkin](http://localhost:8001/api/v1/namespaces/istio-system/services/zipkin:9411/proxy/zipkin/) to get trace.
++ Visit [Prometheus UI](http://localhost:9090) to get metrics
 + Visit [Grafana](http://localhost:3000) to get metrics.
 
+```
+# Customize prometheus
+kubectl port-forward $(kubectl get pods --selector=app=prometheus-test --output=jsonpath="{.items[0].metadata.name}") 9090
+# Access http://localhost:9090
+```
+
+Delete resources
+```
+kubectl delete -f ./telemetry-go/
+```
+
 ### Sample app: blue/green deployment
+```
+kubectl apply -f ./blue-green-demo/blue-green-demo-config.yaml
+kubectl apply -f ./blue-green-demo/blue-green-demo-route.yaml
+export KINGRESS_IP=`kubectl get svc knative-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
+export BLUEGREEN_DEMO_HOST=`kubectl get route blue-green-demo --output jsonpath="{.status.domain}"`
+curl -H "Host: $BLUEGREEN_DEMO_HOST" http://$KINGRESS_IP
+
+# Change config from blue to green
+# Change route to send traffic to V1 and send 0 traffic to V2 but with name route
+kubectl apply -f ./blue-green-demo/blue-green-demo-config.yaml
+kubectl apply -f ./blue-green-demo/blue-green-demo-route.yaml
+curl -H "Host: $BLUEGREEN_DEMO_HOST" http://$KINGRESS_IP
+curl -H "Host: v2.$BLUEGREEN_DEMO_HOST" http://$KINGRESS_IP
+
+# Change route to half and half
+kubectl apply -f ./blue-green-demo/blue-green-demo-route.yaml
+curl -H "Host: $BLUEGREEN_DEMO_HOST" http://$KINGRESS_IP
+
+# delete
+kubectl delete route blue-green-demo
+kubectl delete configuration blue-green-demo
+```
 
 ## Appendix
 Open prometheus Web UI:
