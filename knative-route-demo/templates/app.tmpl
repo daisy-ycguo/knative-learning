@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Knative Routing Demo</title>
+    <link rel="stylesheet" type="text/css" href="/css/app.css" />
+</head>
+<body>
+        {{ if eq .version "green" }} 
+            <div class="green">App v2</div>
+        {{else}}
+            <div class="blue">App v1</div>
+        {{end}}
+    </div>
+</body>
+</html>

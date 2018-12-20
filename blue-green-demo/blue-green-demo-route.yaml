@@ -1,0 +1,12 @@
+apiVersion: serving.knative.dev/v1alpha1
+kind: Route
+metadata:
+  name: blue-green-demo # The name of our route; appears in the URL to access the app
+  namespace: default # The namespace we're working in; also appears in the URL to access the app
+spec:
+  traffic:
+    - revisionName: blue-green-demo-00001
+      percent: 50 # All traffic still going to the first revision
+    - revisionName: blue-green-demo-00002
+      percent: 50 # 0% of traffic routed to the second revision
+      name: v2 # A named route
