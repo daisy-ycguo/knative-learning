@@ -19,7 +19,7 @@
 
 # Study Knative
 
-This repo contains useful steps to install Knative, test app on Knative and understand Knative.
+This repo contains useful steps to install Knative, test service on Knative and understand Knative.
 
 ## Install
 1. Install istio
