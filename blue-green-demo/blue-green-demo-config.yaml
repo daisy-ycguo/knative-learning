@@ -10,10 +10,10 @@ spec:
         knative.dev/type: container
     spec:
       container:
-        image: gcr.io/knative-samples/knative-route-demo:blue
-        #image: gcr.io/knative-samples/knative-route-demo:green
+        image: gcr.io/knative-samples/knative-route-demo:green
+        #image: gcr.io/knative-samples/knative-route-demo:blue
         imagePullPolicy: Always
         env:
           - name: T_VERSION
-            value: "blue"
-            #value: "green"
+            value: "green"
+            #value: "blue"

@@ -1,0 +1,10 @@
+apiVersion: sources.eventing.knative.dev/v1alpha1
+kind: ContainerSource
+metadata:
+  name: bad
+spec:
+  image: not-used
+  sink:
+    apiVersion: serving.knative.dev/v1alpha1
+    kind: Service
+    name: ""

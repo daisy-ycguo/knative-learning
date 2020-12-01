@@ -31,7 +31,7 @@ kubectl get pods -n istio-system
 ```
 2. Install build and serving
 ```
-kubectl apply -f serving-release-0.2.2.yaml
+kubectl apply -f https://github.com/knative/serving/releases/download/v0.3.0/serving.yaml
 # Check pods are running
 kubectl get pods -n knative-serving
 kubectl get pods -n knative-build
@@ -43,11 +43,11 @@ kubectl apply -f service.yaml
 kubectl get Pods
 
 # Get the public IP of knative-ingressgateway
-export KINGRESS_IP=`kubectl get svc knative-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
+export KINGRESS_IP=`kubectl get svc istio-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
 # Get url
 export HELLOWORLD_URL=$(kubectl get services.serving.knative.dev helloworld-go  -o jsonpath='{.status.domain}')
 # Test your app
-curl -H "Host: ${HELLOWORLD_URL}" http://${KINGRESS_IP}
+curl -H "Host: helloworld-go.default.svc.cluster.local" http://130.198.86.58
 
 # Delete your deployment
 kubectl delete -f service.yaml
@@ -80,15 +80,21 @@ kubectl delete -f kaniko.yaml
 5. Eventing trial
 ```
 #Install
-kubectl apply -f eventing-release-0.2.0.yaml
+kubectl apply -f https://github.com/knative/eventing/releases/download/v0.3.0/release.yaml
 #Install three eventsource type
-kubectl apply -f eventing-eventsource-0.2.0.yaml
+kubectl apply -f https://github.com/knative/eventing-sources/releases/download/v0.3.0/release.yaml
 
 #Github samples
 #Create a github-message-dumper service
 kubectl apply -f ./github-event-sample/service.yaml
 kubectl apply -f ./github-event-sample/githubsecret.yaml
 kubectl apply -f ./github-event-sample/github-source.yaml
+```
+
+Test with
+```
+export KINGRESS_IP=`kubectl get svc knative-ingressgateway --namespace istio-system --output jsonpath="{.status.loadBalancer.ingress[*].ip}"`
+curl -X POST -H "Host: githubsourcesample-xzgp7.default.example.com" -H "X-GitHub-Event: pull_request" -H "X-Hub-Signature: sha1=7d38cdd689735b008b3c702edd92eea23791c5f6" -H "X-Github-Delivery: 72d3162e-cc78-11e3-81ab-4c9367dc0958" -d @payload.json http://${KINGRESS_IP}
 ```
 
 6. Logging, monitoring and metrics
@@ -141,6 +147,7 @@ export KINGRESS_IP=`kubectl get svc knative-ingressgateway --namespace istio-sys
 export TELEMETRY_HOST=`kubectl get route telemetrysample-route --output jsonpath="{.status.domain}"`
 curl -H "Host:$TELEMETRY_HOST" http://${KINGRESS_IP}
 curl -H "Host:$TELEMETRY_HOST" http://${KINGRESS_IP}/log
+curl -H "Host:telemetrysample-route.default.example.com" http://168.1.195.91/log
 
 # Exporting
 kubectl proxy

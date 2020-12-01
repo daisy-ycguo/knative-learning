@@ -1,0 +1,13 @@
+
+# The Channel events are sent to.
+
+apiVersion: eventing.knative.dev/v1alpha1
+kind: Channel
+metadata:
+  name: chan
+  namespace: knative-debug1
+spec:
+  provisioner:
+    apiVersion: eventing.knative.dev/v1alpha1
+    kind: ClusterChannelProvisioner
+    name: in-memory-channel

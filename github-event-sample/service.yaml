@@ -1,12 +1,12 @@
-# This is a very simple Knative Service that writes the input request to its log.
 apiVersion: serving.knative.dev/v1alpha1
 kind: Service
 metadata:
-  name: github-message-dumper
+  name: event-display
+  namespace: test
 spec:
   runLatest:
     configuration:
       revisionTemplate:
         spec:
           container:
-            image: gcr.io/knative-releases/github.com/knative/eventing-sources/cmd/message_dumper
+            image: docker.io/daisyycguo/event_display-bb44423e21d22fe93666b961f6cfb013

@@ -1,0 +1,461 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: knative-monitoring
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: elasticsearch-logging
+    kubernetes.io/cluster-service: "true"
+    kubernetes.io/name: Elasticsearch
+  name: elasticsearch-logging
+  namespace: knative-monitoring
+spec:
+  ports:
+  - port: 9200
+    protocol: TCP
+    targetPort: db
+  selector:
+    app: elasticsearch-logging
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: elasticsearch-logging
+    kubernetes.io/cluster-service: "true"
+  name: elasticsearch-logging
+  namespace: knative-monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: elasticsearch-logging
+    kubernetes.io/cluster-service: "true"
+  name: elasticsearch-logging
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - services
+  - namespaces
+  - endpoints
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: elasticsearch-logging
+    kubernetes.io/cluster-service: "true"
+  name: elasticsearch-logging
+  namespace: knative-monitoring
+roleRef:
+  apiGroup: ""
+  kind: ClusterRole
+  name: elasticsearch-logging
+subjects:
+- apiGroup: ""
+  kind: ServiceAccount
+  name: elasticsearch-logging
+  namespace: knative-monitoring
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: elasticsearch-logging
+    kubernetes.io/cluster-service: "true"
+    version: v5.6.4
+  name: elasticsearch-logging
+  namespace: knative-monitoring
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: elasticsearch-logging
+      version: v5.6.4
+  serviceName: elasticsearch-logging
+  template:
+    metadata:
+      labels:
+        app: elasticsearch-logging
+        kubernetes.io/cluster-service: "true"
+        version: v5.6.4
+    spec:
+      containers:
+      - env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        image: k8s.gcr.io/elasticsearch:v5.6.4
+        name: elasticsearch-logging
+        ports:
+        - containerPort: 9200
+          name: db
+          protocol: TCP
+        - containerPort: 9300
+          name: transport
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 1000m
+          requests:
+            cpu: 100m
+        volumeMounts:
+        - mountPath: /data
+          name: elasticsearch-logging
+      initContainers:
+      - command:
+        - /sbin/sysctl
+        - -w
+        - vm.max_map_count=262144
+        image: alpine:3.6
+        name: elasticsearch-logging-init
+        securityContext:
+          privileged: true
+      serviceAccountName: elasticsearch-logging
+      volumes:
+      - emptyDir: {}
+        name: elasticsearch-logging
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: kibana-logging
+    kubernetes.io/cluster-service: "true"
+    kubernetes.io/name: Kibana
+  name: kibana-logging
+  namespace: knative-monitoring
+spec:
+  ports:
+  - port: 5601
+    protocol: TCP
+    targetPort: ui
+  selector:
+    app: kibana-logging
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: kibana-logging
+    kubernetes.io/cluster-service: "true"
+  name: kibana-logging
+  namespace: knative-monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana-logging
+  template:
+    metadata:
+      labels:
+        app: kibana-logging
+    spec:
+      containers:
+      - env:
+        - name: ELASTICSEARCH_URL
+          value: http://elasticsearch-logging.knative-monitoring.svc.cluster.local:9200
+        - name: SERVER_BASEPATH
+          value: /api/v1/namespaces/knative-monitoring/services/kibana-logging/proxy
+        - name: XPACK_MONITORING_ENABLED
+          value: "false"
+        - name: XPACK_SECURITY_ENABLED
+          value: "false"
+        image: docker.elastic.co/kibana/kibana:5.6.4
+        name: kibana-logging
+        ports:
+        - containerPort: 5601
+          name: ui
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 1000m
+          requests:
+            cpu: 100m
+
+---
+apiVersion: v1
+data:
+  100.system.conf: |-
+    <system>
+      root_dir /tmp/fluentd-buffers/
+    </system>
+  200.containers.input.conf: |-
+    <source>
+      @id fluentd-containers.log
+      @type tail
+      path /var/log/containers/*user-container-*.log,/var/log/containers/*build-step-*.log,/var/log/containers/controller-*controller-*.log,/var/log/containers/webhook-*webhook-*.log,/var/log/containers/*autoscaler-*autoscaler-*.log,/var/log/containers/*queue-proxy-*.log,/var/log/containers/activator-*activator-*.log
+      pos_file /var/log/es-containers.log.pos
+      time_format %Y-%m-%dT%H:%M:%S.%NZ
+      tag raw.kubernetes.*
+      format json
+      read_from_head true
+    </source>
+    # Combine multi line logs which form an exception stack trace into a single log entry
+    <match raw.kubernetes.**>
+      @id raw.kubernetes
+      @type detect_exceptions
+      remove_tag_prefix raw
+      message log
+      stream stream
+      multiline_flush_interval 5
+      max_bytes 500000
+      max_lines 1000
+    </match>
+    # Add Kubernetes metadata
+    <filter kubernetes.**>
+      @type kubernetes_metadata
+    </filter>
+  300.forward.input.conf: |-
+    # Takes the messages sent over TCP, e.g. request logs from Istio
+    <source>
+      @type forward
+      port 24224
+    </source>
+  900.output.conf: |-
+    # Send to Elastic Search
+    <match **>
+      @id elasticsearch
+      @type elasticsearch
+      @log_level info
+      include_tag_key true
+      host elasticsearch-logging.knative-monitoring.svc.cluster.local
+      port 9200
+      logstash_format true
+      <buffer>
+        @type file
+        path /var/log/fluentd-buffers/kubernetes.system.buffer
+        flush_mode interval
+        retry_type exponential_backoff
+        flush_thread_count 2
+        flush_interval 5s
+        retry_forever
+        retry_max_interval 30
+        chunk_limit_size 2M
+        queue_limit_length 8
+        overflow_action block
+      </buffer>
+    </match>
+kind: ConfigMap
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+  name: fluentd-ds-config
+  namespace: knative-monitoring
+
+---
+apiVersion: config.istio.io/v1alpha2
+kind: logentry
+metadata:
+  name: requestlog
+  namespace: istio-system
+spec:
+  monitored_resource_type: '"UNSPECIFIED"'
+  severity: '"Info"'
+  timestamp: request.time
+  variables:
+    destinationConfiguration: destination.labels["serving.knative.dev/configuration"]
+      | "unknown"
+    destinationK8sService: destination.service | ""
+    destinationNamespace: destination.namespace | ""
+    destinationRevision: destination.labels["serving.knative.dev/revision"] | "unknown"
+    destinationService: destination.labels["serving.knative.dev/service"] | "unknown"
+    latency: response.duration | "0ms"
+    method: request.method | ""
+    protocol: request.scheme | "http"
+    referer: request.referer | "unknown"
+    requestHost: request.host | ""
+    requestSize: request.size | 0
+    responseCode: response.code | 0
+    responseSize: response.size | 0
+    sourceK8sService: source.service | "unknown"
+    sourceNamespace: source.namespace | "unknown"
+    traceId: request.headers["x-b3-traceid"] | "unknown"
+    url: request.path | ""
+    userAgent: request.useragent | "unknown"
+---
+apiVersion: config.istio.io/v1alpha2
+kind: fluentd
+metadata:
+  name: requestloghandler
+  namespace: istio-system
+spec:
+  address: fluentd-ds.knative-monitoring:24224
+---
+apiVersion: config.istio.io/v1alpha2
+kind: rule
+metadata:
+  name: requestlogtofluentd
+  namespace: istio-system
+spec:
+  actions:
+  - handler: requestloghandler.fluentd
+    instances:
+    - requestlog.logentry
+  match: context.protocol == "http" || context.protocol == "grpc"
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: fluentd-ds
+    kubernetes.io/cluster-service: "true"
+  name: fluentd-ds
+  namespace: knative-monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: fluentd-ds
+    kubernetes.io/cluster-service: "true"
+  name: fluentd-ds
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  - pods
+  verbs:
+  - get
+  - watch
+  - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: fluentd-ds
+    kubernetes.io/cluster-service: "true"
+  name: fluentd-ds
+roleRef:
+  apiGroup: ""
+  kind: ClusterRole
+  name: fluentd-ds
+subjects:
+- apiGroup: ""
+  kind: ServiceAccount
+  name: fluentd-ds
+  namespace: knative-monitoring
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: fluentd-ds
+  name: fluentd-ds
+  namespace: knative-monitoring
+spec:
+  ports:
+  - name: fluentd-tcp
+    port: 24224
+    protocol: TCP
+    targetPort: 24224
+  - name: fluentd-udp
+    port: 24224
+    protocol: UDP
+    targetPort: 24224
+  selector:
+    app: fluentd-ds
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+    app: fluentd-ds
+    kubernetes.io/cluster-service: "true"
+    version: v2.0.4
+  name: fluentd-ds
+  namespace: knative-monitoring
+spec:
+  selector:
+    matchLabels:
+      app: fluentd-ds
+      version: v2.0.4
+  template:
+    metadata:
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ""
+      labels:
+        app: fluentd-ds
+        kubernetes.io/cluster-service: "true"
+        version: v2.0.4
+    spec:
+      containers:
+      - env:
+        - name: FLUENTD_ARGS
+          value: --no-supervisor -q
+        image: k8s.gcr.io/fluentd-elasticsearch:v2.0.4
+        name: fluentd-ds
+        resources:
+          limits:
+            memory: 500Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        volumeMounts:
+        - mountPath: /var/log/containers
+          name: varlogcontainers
+          readOnly: true
+        - mountPath: /var/log/pods
+          name: varlogpods
+          readOnly: true
+        - mountPath: /var/lib/docker/containers
+          name: varlibdockercontainers
+          readOnly: true
+        - mountPath: /host/lib
+          name: libsystemddir
+          readOnly: true
+        - mountPath: /var/data/cripersistentstorage
+          name: persistentstorage
+          readOnly: true
+        - mountPath: /etc/fluent/config.d
+          name: config-volume
+      nodeSelector:
+        beta.kubernetes.io/fluentd-ds-ready: "true"
+      serviceAccountName: fluentd-ds
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - hostPath:
+          path: /var/log/containers
+        name: varlogcontainers
+      - hostPath:
+          path: /var/log/pods
+        name: varlogpods
+      - hostPath:
+          path: /var/lib/docker/containers
+        name: varlibdockercontainers
+      - hostPath:
+          path: /usr/lib64
+        name: libsystemddir
+      - hostPath:
+          path: /var/data/cripersistentstorage
+        name: persistentstorage
+      - configMap:
+          name: fluentd-ds-config
+        name: config-volume
+
+---

@@ -2,10 +2,11 @@ apiVersion: sources.eventing.knative.dev/v1alpha1
 kind: GitHubSource
 metadata:
   name: githubsourcesample
+  namespace: test
 spec:
   eventTypes:
   - pull_request
-  ownerAndRepository: guoyingc/openwhiskpoc
+  ownerAndRepository: guoyingc/eventsource-demo
   accessToken:
     secretKeyRef:
       name: githubsecret
@@ -17,4 +18,4 @@ spec:
   sink:
     apiVersion: serving.knative.dev/v1alpha1
     kind: Service
-    name: github-message-dumper
+    name: event-display

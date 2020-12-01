@@ -1,0 +1,17 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: ingress-for-ibmdomain-http-and-https
+spec:
+  tls:
+  - hosts:
+    - test-knative.au-syd.containers.appdomain.cloud
+    secretName: test-knative
+  rules:
+  - host: test-knative.au-syd.containers.appdomain.cloud
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: knative-ingressgateway
+          servicePort: 80

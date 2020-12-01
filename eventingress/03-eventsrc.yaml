@@ -1,0 +1,10 @@
+apiVersion: sources.eventing.knative.dev/v1alpha1
+kind: CloudEventsIngressSource
+metadata:
+  name: myingress
+spec:
+  namespace: default
+  sink:
+    apiVersion: eventing.knative.dev/v1alpha1
+    kind: Channel
+    name: testchannel

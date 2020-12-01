@@ -1,0 +1,9 @@
+apiVersion: serving.knative.dev/v1alpha1
+kind: Route
+metadata:
+  name: devops-demo # The name of our route; appears in the URL to access the app
+  namespace: default # The namespace we're working in; also appears in the URL to access the app
+spec:
+  traffic:
+    - revisionName: fib-knative-cvjws-1
+      percent: 100

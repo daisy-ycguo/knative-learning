@@ -1,1535 +1,8 @@
----
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: knative-build
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: knative-build-admin
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  - namespaces
-  - secrets
-  - events
-  - serviceaccounts
-  - configmaps
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - extensions
-  resources:
-  - deployments
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - admissionregistration.k8s.io
-  resources:
-  - mutatingwebhookconfigurations
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - apiextensions.k8s.io
-  resources:
-  - customresourcedefinitions
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - build.knative.dev
-  resources:
-  - builds
-  - buildtemplates
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: build-controller
-  namespace: knative-build
----
-apiVersion: rbac.authorization.k8s.io/v1beta1
-kind: ClusterRoleBinding
-metadata:
-  name: build-controller-admin
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: knative-build-admin
-subjects:
-- kind: ServiceAccount
-  name: build-controller
-  namespace: knative-build
----
-apiVersion: apiextensions.k8s.io/v1beta1
-kind: CustomResourceDefinition
-metadata:
-  name: builds.build.knative.dev
-spec:
-  group: build.knative.dev
-  names:
-    kind: Build
-    plural: builds
-  scope: Namespaced
-  version: v1alpha1
----
-apiVersion: apiextensions.k8s.io/v1beta1
-kind: CustomResourceDefinition
-metadata:
-  name: buildtemplates.build.knative.dev
-spec:
-  group: build.knative.dev
-  names:
-    kind: BuildTemplate
-    plural: buildtemplates
-  scope: Namespaced
-  version: v1alpha1
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app: build-controller
-  name: build-controller
-  namespace: knative-build
-spec:
-  ports:
-  - name: metrics
-    port: 9090
-    protocol: TCP
-    targetPort: 9090
-  selector:
-    app: build-controller
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    role: build-webhook
-  name: build-webhook
-  namespace: knative-build
-spec:
-  ports:
-  - port: 443
-    targetPort: 443
-  selector:
-    role: build-webhook
----
-apiVersion: v1
-data:
-  loglevel.autoscaler: info
-  loglevel.controller: info
-  loglevel.queueproxy: info
-  loglevel.webhook: info
-  zap-logger-config: |
-    {
-      "level": "info",
-      "development": false,
-      "sampling": {
-        "initial": 100,
-        "thereafter": 100
-      },
-      "outputPaths": ["stdout"],
-      "errorOutputPaths": ["stderr"],
-      "encoding": "json",
-      "encoderConfig": {
-        "timeKey": "",
-        "levelKey": "level",
-        "nameKey": "logger",
-        "callerKey": "caller",
-        "messageKey": "msg",
-        "stacktraceKey": "stacktrace",
-        "lineEnding": "",
-        "levelEncoder": "",
-        "timeEncoder": "",
-        "durationEncoder": "",
-        "callerEncoder": ""
-      }
-    }
-kind: ConfigMap
-metadata:
-  name: config-logging
-  namespace: knative-build
----
-apiVersion: apps/v1beta1
-kind: Deployment
-metadata:
-  name: build-controller
-  namespace: knative-build
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        app: build-controller
-    spec:
-      containers:
-      - args:
-        - -builder
-        - cluster
-        - -logtostderr
-        - -stderrthreshold
-        - INFO
-        - -creds-image
-        - gcr.io/knative-releases/github.com/knative/build/cmd/creds-init@sha256:a47ea977bef1889c4b29d8dd5c28af923c40a61c12e823d1da6ff0cbeeb41d6d
-        - -git-image
-        - gcr.io/knative-releases/github.com/knative/build/cmd/git-init@sha256:15fac1ab6052706749695418845834f53070df0e6d4778b7225c5ce0af8ca160
-        image: gcr.io/knative-releases/github.com/knative/build/cmd/controller@sha256:6c88fa5ae54a41182d9a7e9795c3a56f7ef716701137095a08f24ff6a3cca37d
-        name: build-controller
-      serviceAccountName: build-controller
----
-apiVersion: apps/v1beta1
-kind: Deployment
-metadata:
-  name: build-webhook
-  namespace: knative-build
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        app: build-webhook
-        role: build-webhook
-    spec:
-      containers:
-      - args:
-        - -builder
-        - cluster
-        - -logtostderr
-        - -stderrthreshold
-        - INFO
-        image: gcr.io/knative-releases/github.com/knative/build/cmd/webhook@sha256:8c894b1f4ad5d89e31d1e4fba0db2bc5930931a48f3d5ac988b66c2c3f82e849
-        name: build-webhook
-        volumeMounts:
-        - mountPath: /etc/config-logging
-          name: config-logging
-      serviceAccountName: build-controller
-      volumes:
-      - configMap:
-          name: config-logging
-        name: config-logging
----
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  labels:
-    istio-injection: enabled
-  name: knative-serving
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: knative-serving-admin
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  - namespaces
-  - secrets
-  - configmaps
-  - endpoints
-  - services
-  - events
-  - serviceaccounts
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - extensions
-  resources:
-  - ingresses
-  - deployments
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - apps
-  resources:
-  - deployments
-  - statefulsets
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - admissionregistration.k8s.io
-  resources:
-  - mutatingwebhookconfigurations
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - apiextensions.k8s.io
-  resources:
-  - customresourcedefinitions
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - serving.knative.dev
-  resources:
-  - configurations
-  - configurationgenerations
-  - routes
-  - revisions
-  - revisionuids
-  - autoscalers
-  - services
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - build.knative.dev
-  resources:
-  - builds
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
-- apiGroups:
-  - networking.istio.io
-  resources:
-  - virtualservices
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: knative-serving-write
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  - namespaces
-  - secrets
-  - configmaps
-  - endpoints
-  - services
-  - events
-  - serviceaccounts
-  verbs:
-  - get
-  - list
-  - update
-  - patch
-  - watch
-- apiGroups:
-  - extensions
-  resources:
-  - ingresses
-  - deployments
-  verbs:
-  - get
-  - list
-  - update
-  - patch
-  - watch
-- apiGroups:
-  - apps
-  resources:
-  - deployments
-  - statefulsets
-  verbs:
-  - get
-  - list
-  - update
-  - patch
-  - watch
-- apiGroups:
-  - admissionregistration.k8s.io
-  resources:
-  - mutatingwebhookconfigurations
-  verbs:
-  - get
-  - list
-  - update
-  - patch
-  - watch
-- apiGroups:
-  - apiextensions.k8s.io
-  resources:
-  - customresourcedefinitions
-  verbs:
-  - get
-  - list
-  - update
-  - patch
-  - watch
-- apiGroups:
-  - serving.knative.dev
-  resources:
-  - configurations
-  - configurationgenerations
-  - routes
-  - revisions
-  - revisionuids
-  - autoscalers
-  - services
-  verbs:
-  - get
-  - list
-  - update
-  - patch
-  - watch
-- apiGroups:
-  - build.knative.dev
-  resources:
-  - builds
-  verbs:
-  - get
-  - list
-  - update
-  - patch
-  - watch
-- apiGroups:
-  - networking.istio.io
-  resources:
-  - virtualservices
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - patch
-  - watch
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: controller
-  namespace: knative-serving
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: autoscaler
-  namespace: knative-serving
----
-apiVersion: rbac.authorization.k8s.io/v1beta1
-kind: ClusterRoleBinding
-metadata:
-  name: knative-serving-controller-admin
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: knative-serving-admin
-subjects:
-- kind: ServiceAccount
-  name: controller
-  namespace: knative-serving
----
-apiVersion: rbac.authorization.k8s.io/v1beta1
-kind: ClusterRoleBinding
-metadata:
-  name: knative-serving-autoscaler-write
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: knative-serving-write
-subjects:
-- kind: ServiceAccount
-  name: autoscaler
-  namespace: knative-serving
----
-apiVersion: networking.istio.io/v1alpha3
-kind: Gateway
-metadata:
-  name: knative-shared-gateway
-  namespace: knative-serving
-spec:
-  selector:
-    knative: ingressgateway
-  servers:
-  - hosts:
-    - '*'
-    port:
-      name: http
-      number: 80
-      protocol: HTTP
-  - hosts:
-    - '*'
-    port:
-      name: https
-      number: 443
-      protocol: HTTPS
-    tls:
-      mode: PASSTHROUGH
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    chart: ingressgateway-0.8.0
-    heritage: Tiller
-    knative: ingressgateway
-    release: RELEASE-NAME
-  name: knative-ingressgateway
-  namespace: istio-system
-spec:
-  ports:
-  - name: http
-    nodePort: 32380
-    port: 80
-  - name: https
-    nodePort: 32390
-    port: 443
-  - name: tcp
-    nodePort: 32400
-    port: 32400
-  selector:
-    knative: ingressgateway
-  type: LoadBalancer
----
-apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  labels:
-    app: knative-ingressgateway
-    chart: ingressgateway-0.8.0
-    heritage: Tiller
-    knative: ingressgateway
-    release: RELEASE-NAME
-  name: knative-ingressgateway
-  namespace: istio-system
-spec:
-  replicas: null
-  template:
-    metadata:
-      annotations:
-        sidecar.istio.io/inject: "false"
-      labels:
-        knative: ingressgateway
-    spec:
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - preference:
-              matchExpressions:
-              - key: beta.kubernetes.io/arch
-                operator: In
-                values:
-                - amd64
-            weight: 2
-          - preference:
-              matchExpressions:
-              - key: beta.kubernetes.io/arch
-                operator: In
-                values:
-                - ppc64le
-            weight: 2
-          - preference:
-              matchExpressions:
-              - key: beta.kubernetes.io/arch
-                operator: In
-                values:
-                - s390x
-            weight: 2
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: beta.kubernetes.io/arch
-                operator: In
-                values:
-                - amd64
-                - ppc64le
-                - s390x
-      containers:
-      - args:
-        - proxy
-        - router
-        - -v
-        - "2"
-        - --discoveryRefreshDelay
-        - 1s
-        - --drainDuration
-        - 45s
-        - --parentShutdownDuration
-        - 1m0s
-        - --connectTimeout
-        - 10s
-        - --serviceCluster
-        - knative-ingressgateway
-        - --zipkinAddress
-        - zipkin:9411
-        - --statsdUdpAddress
-        - istio-statsd-prom-bridge:9125
-        - --proxyAdminPort
-        - "15000"
-        - --controlPlaneAuthPolicy
-        - NONE
-        - --discoveryAddress
-        - istio-pilot:8080
-        env:
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              apiVersion: v1
-              fieldPath: metadata.name
-        - name: POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              apiVersion: v1
-              fieldPath: metadata.namespace
-        - name: INSTANCE_IP
-          valueFrom:
-            fieldRef:
-              apiVersion: v1
-              fieldPath: status.podIP
-        - name: ISTIO_META_POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        image: docker.io/istio/proxyv2:0.8.0
-        imagePullPolicy: IfNotPresent
-        name: ingressgateway
-        ports:
-        - containerPort: 80
-        - containerPort: 443
-        - containerPort: 32400
-        resources: {}
-        volumeMounts:
-        - mountPath: /etc/certs
-          name: istio-certs
-          readOnly: true
-        - mountPath: /etc/istio/ingressgateway-certs
-          name: ingressgateway-certs
-          readOnly: true
-      serviceAccountName: istio-ingressgateway-service-account
-      volumes:
-      - name: istio-certs
-        secret:
-          optional: true
-          secretName: istio.default
-      - name: ingressgateway-certs
-        secret:
-          optional: true
-          secretName: istio-ingressgateway-certs
----
-apiVersion: autoscaling/v2beta1
-kind: HorizontalPodAutoscaler
-metadata:
-  name: knative-ingressgateway
-  namespace: istio-system
-spec:
-  maxReplicas: 10
-  metrics:
-  - resource:
-      name: cpu
-      targetAverageUtilization: 60
-    type: Resource
-  minReplicas: 1
-  scaleTargetRef:
-    apiVersion: apps/v1beta1
-    kind: Deployment
-    name: knative-ingressgateway
----
-apiVersion: apiextensions.k8s.io/v1beta1
-kind: CustomResourceDefinition
-metadata:
-  name: configurations.serving.knative.dev
-spec:
-  group: serving.knative.dev
-  names:
-    kind: Configuration
-    plural: configurations
-  scope: Namespaced
-  version: v1alpha1
----
-apiVersion: apiextensions.k8s.io/v1beta1
-kind: CustomResourceDefinition
-metadata:
-  name: revisions.serving.knative.dev
-spec:
-  group: serving.knative.dev
-  names:
-    kind: Revision
-    plural: revisions
-  scope: Namespaced
-  version: v1alpha1
----
-apiVersion: apiextensions.k8s.io/v1beta1
-kind: CustomResourceDefinition
-metadata:
-  name: routes.serving.knative.dev
-spec:
-  group: serving.knative.dev
-  names:
-    kind: Route
-    plural: routes
-  scope: Namespaced
-  version: v1alpha1
----
-apiVersion: apiextensions.k8s.io/v1beta1
-kind: CustomResourceDefinition
-metadata:
-  name: services.serving.knative.dev
-spec:
-  group: serving.knative.dev
-  names:
-    kind: Service
-    plural: services
-  scope: Namespaced
-  version: v1alpha1
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app: activator
-  name: activator-service
-  namespace: knative-serving
-spec:
-  ports:
-  - name: http
-    port: 80
-    protocol: TCP
-    targetPort: 8080
-  selector:
-    app: activator
-  type: NodePort
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app: controller
-  name: controller
-  namespace: knative-serving
-spec:
-  ports:
-  - name: metrics
-    port: 9090
-    protocol: TCP
-    targetPort: 9090
-  selector:
-    app: controller
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    role: webhook
-  name: webhook
-  namespace: knative-serving
-spec:
-  ports:
-  - port: 443
-    targetPort: 443
-  selector:
-    role: webhook
----
-apiVersion: apps/v1beta1
-kind: Deployment
-metadata:
-  name: activator
-  namespace: knative-serving
-spec:
-  replicas: 1
-  template:
-    metadata:
-      annotations:
-        sidecar.istio.io/inject: "true"
-      labels:
-        app: activator
-        role: activator
-    spec:
-      containers:
-      - args:
-        - -logtostderr=true
-        - -stderrthreshold=INFO
-        image: gcr.io/knative-releases/github.com/knative/serving/cmd/activator@sha256:486d806e33f487d2475d1ff70eb5dcff51cf62a16f4b9af06788674b60b1f2ef
-        name: activator
-        ports:
-        - containerPort: 8080
-          name: http
-        volumeMounts:
-        - mountPath: /etc/config-logging
-          name: config-logging
-      serviceAccountName: controller
-      volumes:
-      - configMap:
-          name: config-logging
-        name: config-logging
----
-apiVersion: v1
-data:
-  concurrency-quantum-of-time: 100ms
-  enable-scale-to-zero: "true"
-  enable-vertical-pod-autoscaling: "false"
-  max-scale-up-rate: "10"
-  multi-concurrency-target: "1.0"
-  panic-window: 6s
-  scale-to-zero-threshold: 5m
-  single-concurrency-target: "0.9"
-  stable-window: 60s
-  vpa-multi-concurrency-target: "10.0"
-kind: ConfigMap
-metadata:
-  name: config-autoscaler
-  namespace: knative-serving
----
-apiVersion: v1
-data:
-  autoscalerImage: gcr.io/knative-releases/github.com/knative/serving/cmd/autoscaler@sha256:2a9931ab1cbe6efeec43a47517163622002e0dc2ea5d6ffa0d0e546c2c94b841
-  queueSidecarImage: gcr.io/knative-releases/github.com/knative/serving/cmd/queue@sha256:65b4824c5f21134a1b8373cbc2be8d431744f06caf118a309f94b6514cd6f40c
-  registriesSkippingTagResolving: ko.local,dev.local
-kind: ConfigMap
-metadata:
-  name: config-controller
-  namespace: knative-serving
----
-apiVersion: v1
-data:
-  example.com: ""
-kind: ConfigMap
-metadata:
-  name: config-domain
-  namespace: knative-serving
----
-apiVersion: v1
-data:
-  loglevel.activator: info
-  loglevel.autoscaler: info
-  loglevel.controller: info
-  loglevel.queueproxy: info
-  loglevel.webhook: info
-  zap-logger-config: |
-    {
-      "level": "info",
-      "development": false,
-      "outputPaths": ["stdout"],
-      "errorOutputPaths": ["stderr"],
-      "encoding": "json",
-      "encoderConfig": {
-        "timeKey": "ts",
-        "levelKey": "level",
-        "nameKey": "logger",
-        "callerKey": "caller",
-        "messageKey": "msg",
-        "stacktraceKey": "stacktrace",
-        "lineEnding": "",
-        "levelEncoder": "",
-        "timeEncoder": "iso8601",
-        "durationEncoder": "",
-        "callerEncoder": ""
-      }
-    }
-kind: ConfigMap
-metadata:
-  name: config-logging
-  namespace: knative-serving
----
-apiVersion: v1
-data:
-  istio.sidecar.includeOutboundIPRanges: '*'
-kind: ConfigMap
-metadata:
-  name: config-network
-  namespace: knative-serving
----
-apiVersion: v1
-data:
-  logging.enable-var-log-collection: "false"
-  logging.fluentd-sidecar-image: k8s.gcr.io/fluentd-elasticsearch:v2.0.4
-  logging.fluentd-sidecar-output-config: |
-    # Parse json log before sending to Elastic Search
-    <filter **>
-      @type parser
-      key_name log
-      <parse>
-        @type multi_format
-        <pattern>
-          format json
-          time_key fluentd-time # fluentd-time is reserved for structured logs
-          time_format %Y-%m-%dT%H:%M:%S.%NZ
-        </pattern>
-        <pattern>
-          format none
-          message_key log
-        </pattern>
-      </parse>
-    </filter>
-    # Send to Elastic Search
-    <match **>
-      @id elasticsearch
-      @type elasticsearch
-      @log_level info
-      include_tag_key true
-      # Elasticsearch service is in monitoring namespace.
-      host elasticsearch-logging.monitoring
-      port 9200
-      logstash_format true
-      <buffer>
-        @type file
-        path /var/log/fluentd-buffers/kubernetes.system.buffer
-        flush_mode interval
-        retry_type exponential_backoff
-        flush_thread_count 2
-        flush_interval 5s
-        retry_forever
-        retry_max_interval 30
-        chunk_limit_size 2M
-        queue_limit_length 8
-        overflow_action block
-      </buffer>
-    </match>
-  logging.revision-url-template: |
-    http://localhost:8001/api/v1/namespaces/monitoring/services/kibana-logging/proxy/app/kibana#/discover?_a=(query:(match:(kubernetes.labels.knative-dev%2FrevisionUID:(query:'${REVISION_UID}',type:phrase))))
-kind: ConfigMap
-metadata:
-  name: config-observability
-  namespace: knative-serving
----
-apiVersion: apps/v1beta1
-kind: Deployment
-metadata:
-  name: controller
-  namespace: knative-serving
-spec:
-  replicas: 1
-  template:
-    metadata:
-      annotations:
-        sidecar.istio.io/inject: "false"
-      labels:
-        app: controller
-    spec:
-      containers:
-      - image: gcr.io/knative-releases/github.com/knative/serving/cmd/controller@sha256:59abc8765d4396a3fc7cac27a932a9cc151ee66343fa5338fb7146b607c6e306
-        name: controller
-        ports:
-        - containerPort: 9090
-          name: metrics
-        volumeMounts:
-        - mountPath: /etc/config-logging
-          name: config-logging
-      serviceAccountName: controller
-      volumes:
-      - configMap:
-          name: config-logging
-        name: config-logging
----
-apiVersion: apps/v1beta1
-kind: Deployment
-metadata:
-  name: webhook
-  namespace: knative-serving
-spec:
-  replicas: 1
-  template:
-    metadata:
-      annotations:
-        sidecar.istio.io/inject: "false"
-      labels:
-        app: webhook
-        role: webhook
-    spec:
-      containers:
-      - image: gcr.io/knative-releases/github.com/knative/serving/cmd/webhook@sha256:7196a38aaf11ed6426db7c40a771e4f2a27d987606b5773b2d05bb9676908e7d
-        name: webhook
-        volumeMounts:
-        - mountPath: /etc/config-logging
-          name: config-logging
-      serviceAccountName: controller
-      volumes:
-      - configMap:
-          name: config-logging
-        name: config-logging
----
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: monitoring
----
-apiVersion: v1
-data:
-  100.system.conf: |-
-    <system>
-      root_dir /tmp/fluentd-buffers/
-    </system>
-  200.containers.input.conf: |-
-    <source>
-      @id fluentd-containers.log
-      @type tail
-      path /var/log/containers/*user-container-*.log,/var/log/containers/*build-step-*.log
-      pos_file /var/log/es-containers.log.pos
-      time_format %Y-%m-%dT%H:%M:%S.%NZ
-      tag raw.kubernetes.*
-      format json
-      read_from_head true
-    </source>
-    # Combine multi line logs which form an exception stack trace into a single log entry
-    <match raw.kubernetes.**>
-      @id raw.kubernetes
-      @type detect_exceptions
-      remove_tag_prefix raw
-      message log
-      stream stream
-      multiline_flush_interval 5
-      max_bytes 500000
-      max_lines 1000
-    </match>
-    # Add Kubernetes metadata
-    <filter kubernetes.**>
-      @type kubernetes_metadata
-    </filter>
-  300.forward.input.conf: |-
-    # Takes the messages sent over TCP, e.g. request logs from Istio
-    <source>
-      @type forward
-      port 24224
-    </source>
-  900.output.conf: |-
-    # Send to Elastic Search
-    <match **>
-      @id elasticsearch
-      @type elasticsearch
-      @log_level info
-      include_tag_key true
-      host elasticsearch-logging
-      port 9200
-      logstash_format true
-      <buffer>
-        @type file
-        path /var/log/fluentd-buffers/kubernetes.system.buffer
-        flush_mode interval
-        retry_type exponential_backoff
-        flush_thread_count 2
-        flush_interval 5s
-        retry_forever
-        retry_max_interval 30
-        chunk_limit_size 2M
-        queue_limit_length 8
-        overflow_action block
-      </buffer>
-    </match>
-kind: ConfigMap
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-  name: fluentd-ds-config
-  namespace: monitoring
----
-apiVersion: v1
-data:
-  scaling-dashboard.json: |-
-    {
-       "__inputs": [
-         {
-           "description": "",
-           "label": "prometheus",
-           "name": "prometheus",
-           "pluginId": "prometheus",
-           "pluginName": "Prometheus",
-           "type": "datasource"
-         }
-       ],
-       "annotations": {
-         "list": []
-       },
-       "description": "Knative Serving - Scaling",
-       "editable": false,
-       "gnetId": null,
-       "graphTooltip": 0,
-       "id": null,
-       "iteration": 1525724908045,
-       "links": [],
-       "panels": [
-         {
-           "aliasColors": {},
-           "bars": false,
-           "dashLength": 10,
-           "dashes": false,
-           "datasource": "prometheus",
-           "fill": 1,
-           "gridPos": {
-             "h": 17,
-             "w": 24,
-             "x": 0,
-             "y": 0
-           },
-           "id": 2,
-           "legend": {
-             "avg": false,
-             "current": true,
-             "max": false,
-             "min": false,
-             "show": true,
-             "total": false,
-             "values": true
-           },
-           "lines": true,
-           "linewidth": 1,
-           "links": [],
-           "nullPointMode": "null",
-           "percentage": false,
-           "pointradius": 5,
-           "points": false,
-           "renderer": "flot",
-           "seriesOverrides": [
-             {
-               "alias": "Panic Mode",
-               "color": "#f29191",
-               "dashes": true,
-               "fill": 2,
-               "linewidth": 2,
-               "steppedLine": true,
-               "yaxis": 2
-             }
-           ],
-           "spaceLength": 10,
-           "stack": false,
-           "steppedLine": true,
-           "targets": [
-             {
-               "expr": "autoscaler_actual_pod_count{configuration_namespace=\"$namespace\", configuration=\"$configuration\", revision=\"$revision\"}",
-               "format": "time_series",
-               "interval": "1s",
-               "intervalFactor": 1,
-               "legendFormat": "Actual Pods",
-               "refId": "A"
-             },
-             {
-               "expr": "autoscaler_desired_pod_count{configuration_namespace=\"$namespace\", configuration=\"$configuration\", revision=\"$revision\"} ",
-               "format": "time_series",
-               "interval": "1s",
-               "intervalFactor": 1,
-               "legendFormat": "Desired Pods",
-               "refId": "B"
-             },
-             {
-               "expr": "autoscaler_requested_pod_count{configuration_namespace=\"$namespace\", configuration=\"$configuration\", revision=\"$revision\"} ",
-               "format": "time_series",
-               "interval": "1s",
-               "intervalFactor": 1,
-               "legendFormat": "Requested Pods",
-               "refId": "C"
-             },
-             {
-               "expr": "autoscaler_panic_mode{configuration_namespace=\"$namespace\", configuration=\"$configuration\", revision=\"$revision\"} ",
-               "format": "time_series",
-               "hide": false,
-               "instant": false,
-               "interval": "1s",
-               "intervalFactor": 1,
-               "legendFormat": "Panic Mode",
-               "refId": "D"
-             }
-           ],
-           "thresholds": [],
-           "timeFrom": null,
-           "timeShift": null,
-           "title": "Revision Pod Counts",
-           "tooltip": {
-             "shared": true,
-             "sort": 0,
-             "value_type": "individual"
-           },
-           "type": "graph",
-           "xaxis": {
-             "buckets": null,
-             "mode": "time",
-             "name": null,
-             "show": true,
-             "values": []
-           },
-           "yaxes": [
-             {
-               "format": "short",
-               "label": null,
-               "logBase": 1,
-               "max": null,
-               "min": null,
-               "show": true
-             },
-             {
-               "decimals": null,
-               "format": "short",
-               "label": "Panic Mode",
-               "logBase": 1,
-               "max": "1.0",
-               "min": "0",
-               "show": true
-             }
-           ]
-         },
-         {
-           "aliasColors": {},
-           "bars": false,
-           "dashLength": 10,
-           "dashes": false,
-           "datasource": "prometheus",
-           "fill": 1,
-           "gridPos": {
-             "h": 9,
-             "w": 12,
-             "x": 0,
-             "y": 17
-           },
-           "id": 4,
-           "legend": {
-             "avg": false,
-             "current": true,
-             "max": false,
-             "min": false,
-             "show": true,
-             "total": false,
-             "values": true
-           },
-           "lines": true,
-           "linewidth": 1,
-           "links": [],
-           "nullPointMode": "null",
-           "percentage": false,
-           "pointradius": 5,
-           "points": false,
-           "renderer": "flot",
-           "seriesOverrides": [],
-           "spaceLength": 10,
-           "stack": false,
-           "steppedLine": false,
-           "targets": [
-             {
-               "expr": "sum(kube_pod_container_resource_requests_cpu_cores{namespace=\"$namespace\", pod=~\"$revision-deployment-.*\"})",
-               "format": "time_series",
-               "interval": "",
-               "intervalFactor": 1,
-               "legendFormat": "Cores requested",
-               "refId": "A"
-             },
-             {
-               "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod_name=~\"$revision-deployment-.*\"}[1m]))",
-               "format": "time_series",
-               "intervalFactor": 1,
-               "legendFormat": "Cores used",
-               "refId": "B"
-             },
-             {
-               "expr": "sum(kube_pod_container_resource_limits_cpu_cores{namespace=\"$namespace\", pod=~\"$revision-deployment-.*\"})",
-               "format": "time_series",
-               "intervalFactor": 1,
-               "legendFormat": "Core limit",
-               "refId": "C"
-             }
-           ],
-           "thresholds": [],
-           "timeFrom": null,
-           "timeShift": null,
-           "title": "Revision CPU Usage",
-           "tooltip": {
-             "shared": true,
-             "sort": 2,
-             "value_type": "individual"
-           },
-           "type": "graph",
-           "xaxis": {
-             "buckets": null,
-             "mode": "time",
-             "name": null,
-             "show": true,
-             "values": []
-           },
-           "yaxes": [
-             {
-               "decimals": null,
-               "format": "short",
-               "label": null,
-               "logBase": 1,
-               "max": null,
-               "min": null,
-               "show": true
-             },
-             {
-               "format": "short",
-               "label": null,
-               "logBase": 1,
-               "max": null,
-               "min": null,
-               "show": false
-             }
-           ]
-         },
-         {
-           "aliasColors": {},
-           "bars": false,
-           "dashLength": 10,
-           "dashes": false,
-           "datasource": "prometheus",
-           "fill": 1,
-           "gridPos": {
-             "h": 9,
-             "w": 12,
-             "x": 12,
-             "y": 17
-           },
-           "id": 6,
-           "legend": {
-             "avg": false,
-             "current": true,
-             "max": false,
-             "min": false,
-             "show": true,
-             "total": false,
-             "values": true
-           },
-           "lines": true,
-           "linewidth": 1,
-           "links": [],
-           "nullPointMode": "null",
-           "percentage": false,
-           "pointradius": 5,
-           "points": false,
-           "renderer": "flot",
-           "seriesOverrides": [],
-           "spaceLength": 10,
-           "stack": false,
-           "steppedLine": false,
-           "targets": [
-             {
-               "expr": "sum(kube_pod_container_resource_requests_memory_bytes{namespace=\"$namespace\", pod=~\"$revision-deployment-.*\"})",
-               "format": "time_series",
-               "interval": "",
-               "intervalFactor": 1,
-               "legendFormat": "Memory requested",
-               "refId": "A"
-             },
-             {
-               "expr": "sum(container_memory_usage_bytes{namespace=\"$namespace\", pod_name=~\"$revision-deployment-.*\"})",
-               "format": "time_series",
-               "hide": false,
-               "intervalFactor": 1,
-               "legendFormat": "Memory used",
-               "refId": "B"
-             },
-             {
-               "expr": "sum(kube_pod_container_resource_limits_memory_bytes{namespace=\"$namespace\", pod=~\"$revision-deployment-.*\"})",
-               "format": "time_series",
-               "intervalFactor": 1,
-               "refId": "C"
-             }
-           ],
-           "thresholds": [],
-           "timeFrom": null,
-           "timeShift": null,
-           "title": "Pod Memory Usage",
-           "tooltip": {
-             "shared": true,
-             "sort": 2,
-             "value_type": "individual"
-           },
-           "type": "graph",
-           "xaxis": {
-             "buckets": null,
-             "mode": "time",
-             "name": null,
-             "show": true,
-             "values": []
-           },
-           "yaxes": [
-             {
-               "format": "decbytes",
-               "label": null,
-               "logBase": 1,
-               "max": null,
-               "min": null,
-               "show": true
-             },
-             {
-               "format": "short",
-               "label": null,
-               "logBase": 1,
-               "max": null,
-               "min": null,
-               "show": false
-             }
-           ]
-         }
-       ],
-       "refresh": "5s",
-       "schemaVersion": 16,
-       "style": "dark",
-       "tags": [],
-       "templating": {
-         "list": [
-           {
-             "allValue": null,
-             "current": {},
-             "datasource": "prometheus",
-             "hide": 0,
-             "includeAll": false,
-             "label": "Namespace",
-             "multi": false,
-             "name": "namespace",
-             "options": [],
-             "query": "label_values(autoscaler_actual_pod_count, configuration_namespace)",
-             "refresh": 1,
-             "regex": "",
-             "sort": 1,
-             "tagValuesQuery": "",
-             "tags": [],
-             "tagsQuery": "",
-             "type": "query",
-             "useTags": false
-           },
-           {
-             "allValue": null,
-             "current": {},
-             "datasource": "prometheus",
-             "hide": 0,
-             "includeAll": false,
-             "label": "Configuration",
-             "multi": false,
-             "name": "configuration",
-             "options": [],
-             "query": "label_values(autoscaler_actual_pod_count{configuration_namespace=\"$namespace\"}, configuration)",
-             "refresh": 1,
-             "regex": "",
-             "sort": 1,
-             "tagValuesQuery": "",
-             "tags": [],
-             "tagsQuery": "",
-             "type": "query",
-             "useTags": false
-           },
-           {
-             "allValue": null,
-             "current": {},
-             "datasource": "prometheus",
-             "hide": 0,
-             "includeAll": false,
-             "label": "Revision",
-             "multi": false,
-             "name": "revision",
-             "options": [],
-             "query": "label_values(autoscaler_actual_pod_count{configuration_namespace=\"$namespace\", configuration=\"$configuration\"}, revision)",
-             "refresh": 1,
-             "regex": "",
-             "sort": 2,
-             "tagValuesQuery": "",
-             "tags": [],
-             "tagsQuery": "",
-             "type": "query",
-             "useTags": false
-           }
-         ]
-       },
-       "time": {
-         "from": "now-15m",
-         "to": "now"
-       },
-       "timepicker": {
-         "refresh_intervals": [
-           "5s",
-           "10s",
-           "30s",
-           "1m",
-           "5m",
-           "15m",
-           "30m",
-           "1h",
-           "2h",
-           "1d"
-         ],
-         "time_options": [
-           "5m",
-           "15m",
-           "1h",
-           "6h",
-           "12h",
-           "24h",
-           "2d",
-           "7d",
-           "30d"
-         ]
-       },
-       "timezone": "",
-       "title": "Knative Serving - Scaling",
-       "uid": "u_-9SIMiz",
-       "version": 4
-     }
-kind: ConfigMap
-metadata:
-  name: scaling-config
-  namespace: monitoring
+  name: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -3122,7 +1595,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-istio
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -5210,7 +3684,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-mixer
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -6916,139 +5391,20 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-pilot
-  namespace: monitoring
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: fluentd-ds
-    kubernetes.io/cluster-service: "true"
-  name: fluentd-ds
-  namespace: monitoring
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: fluentd-ds
-    kubernetes.io/cluster-service: "true"
-  name: fluentd-ds
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - namespaces
-  - pods
-  verbs:
-  - get
-  - watch
-  - list
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: fluentd-ds
-    kubernetes.io/cluster-service: "true"
-  name: fluentd-ds
-roleRef:
-  apiGroup: ""
-  kind: ClusterRole
-  name: fluentd-ds
-subjects:
-- apiGroup: ""
-  kind: ServiceAccount
-  name: fluentd-ds
-  namespace: monitoring
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: fluentd-ds
-    kubernetes.io/cluster-service: "true"
-    version: v2.0.4
-  name: fluentd-ds
-  namespace: monitoring
-spec:
-  selector:
-    matchLabels:
-      app: fluentd-ds
-      version: v2.0.4
-  template:
-    metadata:
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ""
-      labels:
-        app: fluentd-ds
-        kubernetes.io/cluster-service: "true"
-        version: v2.0.4
-    spec:
-      containers:
-      - env:
-        - name: FLUENTD_ARGS
-          value: --no-supervisor -q
-        image: k8s.gcr.io/fluentd-elasticsearch:v2.0.4
-        name: fluentd-ds
-        resources:
-          limits:
-            memory: 500Mi
-          requests:
-            cpu: 100m
-            memory: 200Mi
-        volumeMounts:
-        - mountPath: /var/log/containers
-          name: varlogcontainers
-          readOnly: true
-        - mountPath: /var/log/pods
-          name: varlogpods
-          readOnly: true
-        - mountPath: /var/lib/docker/containers
-          name: varlibdockercontainers
-          readOnly: true
-        - mountPath: /host/lib
-          name: libsystemddir
-          readOnly: true
-        - mountPath: /etc/fluent/config.d
-          name: config-volume
-      nodeSelector:
-        beta.kubernetes.io/fluentd-ds-ready: "true"
-      priorityClassName: system-node-critical
-      serviceAccountName: fluentd-ds
-      terminationGracePeriodSeconds: 30
-      volumes:
-      - hostPath:
-          path: /var/log/containers
-        name: varlogcontainers
-      - hostPath:
-          path: /var/log/pods
-        name: varlogpods
-      - hostPath:
-          path: /var/lib/docker/containers
-        name: varlibdockercontainers
-      - hostPath:
-          path: /usr/lib64
-        name: libsystemddir
-      - configMap:
-          name: fluentd-ds-config
-        name: config-volume
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: kube-state-metrics
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: Role
 metadata:
   name: kube-state-metrics-resizer
-  namespace: monitoring
+  namespace: knative-monitoring
 rules:
 - apiGroups:
   - ""
@@ -7070,7 +5426,7 @@ apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: RoleBinding
 metadata:
   name: kube-state-metrics
-  namespace: monitoring
+  namespace: knative-monitoring
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -7078,13 +5434,13 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kube-state-metrics
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
 metadata:
   name: kube-state-metrics
-  namespace: monitoring
+  namespace: knative-monitoring
 rules:
 - apiGroups:
   - ""
@@ -7152,7 +5508,7 @@ apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding
 metadata:
   name: kube-state-metrics
-  namespace: monitoring
+  namespace: knative-monitoring
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -7160,13 +5516,13 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kube-state-metrics
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
   name: kube-state-metrics
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   replicas: 1
   template:
@@ -7250,7 +5606,7 @@ metadata:
   labels:
     app: kube-state-metrics
   name: kube-state-metrics
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   clusterIP: None
   ports:
@@ -7264,6 +5620,7 @@ spec:
     targetPort: https-self
   selector:
     app: kube-state-metrics
+
 ---
 apiVersion: v1
 data:
@@ -8002,7 +6359,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-kubernetes-deployment
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -8984,7 +7342,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-kubernetes-capacity-planning
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -9687,7 +8046,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-kubernetes-cluster-health
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -10505,7 +8865,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-kubernetes-cluster-status
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -11139,7 +9500,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-kubernetes-control-plane-status
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -11550,7 +9912,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-kubernetes-resource-requests
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -12380,7 +10743,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-kubernetes-nodes
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -12806,7 +11170,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-kubernetes-pods
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -13523,19 +11888,20 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-kubernetes-statefulset
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: node-exporter
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: node-exporter
-  namespace: monitoring
+  namespace: knative-monitoring
 rules:
 - apiGroups:
   - authentication.k8s.io
@@ -13554,7 +11920,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: node-exporter
-  namespace: monitoring
+  namespace: knative-monitoring
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -13562,20 +11928,20 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: node-exporter
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
 apiVersion: extensions/v1beta1
 kind: DaemonSet
 metadata:
   name: node-exporter
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   template:
     metadata:
       labels:
         app: node-exporter
       name: node-exporter
-      namespace: monitoring
+      namespace: knative-monitoring
     spec:
       containers:
       - args:
@@ -13641,7 +12007,7 @@ metadata:
   labels:
     app: node-exporter
   name: node-exporter
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   clusterIP: None
   ports:
@@ -13651,212 +12017,7 @@ spec:
   selector:
     app: node-exporter
   type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: elasticsearch-logging
-    kubernetes.io/cluster-service: "true"
-    kubernetes.io/name: Elasticsearch
-  name: elasticsearch-logging
-  namespace: monitoring
-spec:
-  ports:
-  - port: 9200
-    protocol: TCP
-    targetPort: db
-  selector:
-    app: elasticsearch-logging
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: elasticsearch-logging
-    kubernetes.io/cluster-service: "true"
-  name: elasticsearch-logging
-  namespace: monitoring
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: elasticsearch-logging
-    kubernetes.io/cluster-service: "true"
-  name: elasticsearch-logging
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - services
-  - namespaces
-  - endpoints
-  verbs:
-  - get
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: elasticsearch-logging
-    kubernetes.io/cluster-service: "true"
-  name: elasticsearch-logging
-  namespace: monitoring
-roleRef:
-  apiGroup: ""
-  kind: ClusterRole
-  name: elasticsearch-logging
-subjects:
-- apiGroup: ""
-  kind: ServiceAccount
-  name: elasticsearch-logging
-  namespace: monitoring
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: elasticsearch-logging
-    kubernetes.io/cluster-service: "true"
-    version: v5.6.4
-  name: elasticsearch-logging
-  namespace: monitoring
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: elasticsearch-logging
-      version: v5.6.4
-  serviceName: elasticsearch-logging
-  template:
-    metadata:
-      labels:
-        app: elasticsearch-logging
-        kubernetes.io/cluster-service: "true"
-        version: v5.6.4
-    spec:
-      containers:
-      - env:
-        - name: NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        image: k8s.gcr.io/elasticsearch:v5.6.4
-        name: elasticsearch-logging
-        ports:
-        - containerPort: 9200
-          name: db
-          protocol: TCP
-        - containerPort: 9300
-          name: transport
-          protocol: TCP
-        resources:
-          limits:
-            cpu: 1000m
-          requests:
-            cpu: 100m
-        volumeMounts:
-        - mountPath: /data
-          name: elasticsearch-logging
-      initContainers:
-      - command:
-        - /sbin/sysctl
-        - -w
-        - vm.max_map_count=262144
-        image: alpine:3.6
-        name: elasticsearch-logging-init
-        securityContext:
-          privileged: true
-      serviceAccountName: elasticsearch-logging
-      volumes:
-      - emptyDir: {}
-        name: elasticsearch-logging
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: kibana-logging
-    kubernetes.io/cluster-service: "true"
-  name: kibana-logging
-  namespace: monitoring
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: kibana-logging
-  template:
-    metadata:
-      labels:
-        app: kibana-logging
-    spec:
-      containers:
-      - env:
-        - name: ELASTICSEARCH_URL
-          value: http://elasticsearch-logging:9200
-        - name: SERVER_BASEPATH
-          value: /api/v1/namespaces/monitoring/services/kibana-logging/proxy
-        - name: XPACK_MONITORING_ENABLED
-          value: "false"
-        - name: XPACK_SECURITY_ENABLED
-          value: "false"
-        image: docker.elastic.co/kibana/kibana:5.6.4
-        name: kibana-logging
-        ports:
-        - containerPort: 5601
-          name: ui
-          protocol: TCP
-        resources:
-          limits:
-            cpu: 1000m
-          requests:
-            cpu: 100m
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    addonmanager.kubernetes.io/mode: Reconcile
-    app: kibana-logging
-    kubernetes.io/cluster-service: "true"
-    kubernetes.io/name: Kibana
-  name: kibana-logging
-  namespace: monitoring
-spec:
-  ports:
-  - port: 5601
-    protocol: TCP
-    targetPort: ui
-  selector:
-    app: kibana-logging
-  type: NodePort
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app: fluentd-ds
-  name: fluentd-ds
-  namespace: monitoring
-spec:
-  ports:
-  - name: fluentd-tcp
-    port: 24224
-    protocol: TCP
-    targetPort: 24224
-  - name: fluentd-udp
-    port: 24224
-    protocol: UDP
-    targetPort: 24224
-  selector:
-    app: fluentd-ds
+
 ---
 apiVersion: v1
 data:
@@ -13963,11 +12124,11 @@ data:
               "refId": "E"
             },
             {
-              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"monitoring\"}[1m]))",
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"knative-monitoring\"}[1m]))",
               "format": "time_series",
               "instant": false,
               "intervalFactor": 1,
-              "legendFormat": "monitoring",
+              "legendFormat": "knative-monitoring",
               "refId": "B"
             }
           ],
@@ -14088,11 +12249,11 @@ data:
               "refId": "E"
             },
             {
-              "expr": "sum(container_memory_usage_bytes{namespace=\"monitoring\"})",
+              "expr": "sum(container_memory_usage_bytes{namespace=\"knative-monitoring\"})",
               "format": "time_series",
               "instant": false,
               "intervalFactor": 1,
-              "legendFormat": "monitoring",
+              "legendFormat": "knative-monitoring",
               "refId": "B"
             }
           ],
@@ -14172,7 +12333,7 @@ data:
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace!~\"knative-serving|monitoring|knative-build|istio-system|kube-system|kube-public|^$\"}[1m]))",
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace!~\"knative-serving|knative-monitoring|knative-build|istio-system|kube-system|kube-public|^$\"}[1m]))",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -14180,7 +12341,7 @@ data:
               "refId": "A"
             },
             {
-              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"knative-serving|monitoring|knative-build|istio-system|kube-system|kube-public\"}[1m]))",
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"knative-serving|knative-monitoring|knative-build|istio-system|kube-system|kube-public\"}[1m]))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "Control plane",
@@ -14263,7 +12424,7 @@ data:
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(container_memory_usage_bytes{namespace!~\"knative-serving|monitoring|knative-build|istio-system|kube-system|kube-public|^$\"})",
+              "expr": "sum(container_memory_usage_bytes{namespace!~\"knative-serving|knative-monitoring|knative-build|istio-system|kube-system|kube-public|^$\"})",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -14271,7 +12432,7 @@ data:
               "refId": "A"
             },
             {
-              "expr": "sum(container_memory_usage_bytes{namespace=~\"knative-serving|monitoring|knative-build|istio-system|kube-system|kube-public\"})",
+              "expr": "sum(container_memory_usage_bytes{namespace=~\"knative-serving|knative-monitoring|knative-build|istio-system|kube-system|kube-public\"})",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "Control plane",
@@ -14359,7 +12520,1018 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-knative-efficiency
-  namespace: monitoring
+  namespace: knative-monitoring
+
+---
+apiVersion: v1
+data:
+  knative-reconciler-dashboard.json: |
+    {
+      "__inputs": [
+        {
+          "description": "",
+          "label": "prometheus",
+          "name": "prometheus",
+          "pluginId": "prometheus",
+          "pluginName": "Prometheus",
+          "type": "datasource"
+        }
+      ],
+      "annotations": {
+        "list": []
+      },
+      "description": "Knative Serving - Reconciler",
+      "editable": false,
+      "gnetId": null,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "id": 7,
+          "panels": [],
+          "title": "Aggregate",
+          "type": "row"
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "prometheus",
+          "fill": 1,
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "id": 10,
+          "legend": {
+            "alignAsTable": false,
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": false,
+            "max": false,
+            "min": false,
+            "rightSide": false,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": true,
+          "targets": [
+            {
+              "expr": "sum by (reconciler)(60 * rate(controller_reconcile_count[1m]))",
+              "format": "time_series",
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "{{reconciler}}",
+              "refId": "A"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "Reconcile Count (per min)",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 10
+          },
+          "id": 5,
+          "panels": [],
+          "title": "Per Reconciler",
+          "type": "row"
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "prometheus",
+          "fill": 1,
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 11
+          },
+          "id": 2,
+          "legend": {
+            "alignAsTable": false,
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": false,
+            "max": false,
+            "min": false,
+            "rightSide": false,
+            "show": false,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": true,
+          "targets": [
+            {
+              "expr": "sum(60 * rate(controller_reconcile_count{reconciler=\"$reconciler\"}[1m]))",
+              "format": "time_series",
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "{{reconciler}}",
+              "refId": "A"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "$reconciler Reconcile Count (per min)",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ]
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "prometheus",
+          "fill": 1,
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 11
+          },
+          "id": 11,
+          "legend": {
+            "alignAsTable": false,
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": false,
+            "max": false,
+            "min": false,
+            "rightSide": false,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": true,
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(controller_reconcile_latency_bucket{reconciler=\"$reconciler\"}[1m])) by (le))",
+              "format": "time_series",
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "99th",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.90, sum(rate(controller_reconcile_latency_bucket{reconciler=\"$reconciler\"}[1m])) by (le))",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "90th",
+              "refId": "B"
+            },
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(controller_reconcile_latency_bucket{reconciler=\"$reconciler\"}[1m])) by (le))",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "50th",
+              "refId": "C"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "$reconciler Reconcile Latency Percentiles",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 20
+          },
+          "id": 9,
+          "panels": [],
+          "title": "Per Reconciler & Key",
+          "type": "row"
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "prometheus",
+          "fill": 1,
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 21
+          },
+          "id": 12,
+          "legend": {
+            "alignAsTable": false,
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": false,
+            "max": false,
+            "min": false,
+            "rightSide": false,
+            "show": false,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": true,
+          "targets": [
+            {
+              "expr": "sum(60 * rate(controller_reconcile_count{reconciler=\"$reconciler\", key=\"$key\"}[1m]))",
+              "format": "time_series",
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "{{reconciler}}",
+              "refId": "A"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "$reconciler/$key Reconcile Count (per min)",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ]
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "prometheus",
+          "fill": 1,
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 21
+          },
+          "id": 13,
+          "legend": {
+            "alignAsTable": false,
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": false,
+            "max": false,
+            "min": false,
+            "rightSide": false,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": true,
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(controller_reconcile_latency_bucket{reconciler=\"$reconciler\", key=\"$key\"}[1m])) by (le))",
+              "format": "time_series",
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "99th",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.90, sum(rate(controller_reconcile_latency_bucket{reconciler=\"$reconciler\", key=\"$key\"}[1m])) by (le))",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "90th",
+              "refId": "B"
+            },
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(controller_reconcile_latency_bucket{reconciler=\"$reconciler\", key=\"$key\"}[1m])) by (le))",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "50th",
+              "refId": "C"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "$reconciler/$key Reconcile Latency Percentiles",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ]
+        }
+      ],
+      "refresh": "5s",
+      "schemaVersion": 16,
+      "style": "dark",
+      "tags": [],
+      "templating": {
+        "list": [
+          {
+            "allValue": null,
+            "current": {},
+            "datasource": "prometheus",
+            "hide": 0,
+            "includeAll": false,
+            "label": "Reconciler",
+            "multi": false,
+            "name": "reconciler",
+            "options": [],
+            "query": "label_values(controller_reconcile_count, reconciler)",
+            "refresh": 1,
+            "regex": "",
+            "sort": 0,
+            "tagValuesQuery": "",
+            "tags": [],
+            "tagsQuery": "",
+            "type": "query",
+            "useTags": false
+          },
+          {
+            "allValue": null,
+            "current": {},
+            "datasource": "prometheus",
+            "hide": 0,
+            "includeAll": false,
+            "label": "Key",
+            "multi": false,
+            "name": "key",
+            "options": [],
+            "query": "label_values(controller_reconcile_count{reconciler=\"$reconciler\"}, key)",
+            "refresh": 1,
+            "regex": "",
+            "sort": 1,
+            "tagValuesQuery": "",
+            "tags": [],
+            "tagsQuery": "",
+            "type": "query",
+            "useTags": false
+          }
+        ]
+      },
+      "time": {
+        "from": "now-15m",
+        "to": "now"
+      },
+      "timepicker": {
+        "refresh_intervals": [
+          "5s",
+          "10s",
+          "30s",
+          "1m",
+          "5m",
+          "15m",
+          "30m",
+          "1h",
+          "2h",
+          "1d"
+        ],
+        "time_options": [
+          "5m",
+          "15m",
+          "1h",
+          "6h",
+          "12h",
+          "24h",
+          "2d",
+          "7d",
+          "30d"
+        ]
+      },
+      "timezone": "",
+      "title": "Knative Serving - Reconciler",
+      "uid": "j0oFdEYiz",
+      "version": 10
+    }
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-definition-knative-reconciler
+  namespace: knative-monitoring
+
+---
+apiVersion: v1
+data:
+  scaling-dashboard.json: "{  \n   \"__inputs\":[  \n      {  \n         \"name\":\"prometheus\",\n
+    \        \"label\":\"prometheus\",\n         \"description\":\"\",\n         \"type\":\"datasource\",\n
+    \        \"pluginId\":\"prometheus\",\n         \"pluginName\":\"Prometheus\"\n
+    \     }\n   ],\n   \"__requires\":[  \n      {  \n         \"type\":\"grafana\",\n
+    \        \"id\":\"grafana\",\n         \"name\":\"Grafana\",\n         \"version\":\"5.0.3\"\n
+    \     },\n      {  \n         \"id\":\"graph\",\n         \"name\":\"Graph\",\n
+    \        \"type\":\"panel\",\n         \"version\":\"5.0.0\"\n      },\n      {
+    \ \n         \"type\":\"datasource\",\n         \"id\":\"prometheus\",\n         \"name\":\"Prometheus\",\n
+    \        \"version\":\"5.0.0\"\n      }\n   ],\n   \"annotations\":{  \n      \"list\":[
+    \ \n         {  \n            \"builtIn\":1,\n            \"datasource\":\"--
+    Grafana --\",\n            \"enable\":true,\n            \"hide\":true,\n            \"iconColor\":\"rgba(0,
+    211, 255, 1)\",\n            \"name\":\"Annotations & Alerts\",\n            \"type\":\"dashboard\"\n
+    \        }\n      ]\n   },\n   \"description\":\"Knative Serving - Scaling Debugging\",\n
+    \  \"editable\":false,\n   \"gnetId\":null,\n   \"graphTooltip\":0,\n   \"id\":null,\n
+    \  \"iteration\":1527886043818,\n   \"links\":[  \n\n   ],\n   \"panels\":[  \n
+    \     {  \n\n         \"collapsed\":true,\n         \"gridPos\":{  \n            \"h\":1,\n
+    \           \"w\":24,\n            \"x\":0,\n            \"y\":0\n         },\n
+    \        \"id\":14,\n         \"panels\":[  \n            {  \n               \"aliasColors\":{
+    \ \n\n               },\n               \"bars\":false,\n               \"dashLength\":10,\n
+    \              \"dashes\":false,\n               \"datasource\":\"prometheus\",\n
+    \              \"fill\":1,\n               \"gridPos\":{  \n                  \"h\":11,\n
+    \                 \"w\":24,\n                  \"x\":0,\n                  \"y\":1\n
+    \              },\n               \"id\":2,\n               \"legend\":{  \n                  \"avg\":false,\n
+    \                 \"current\":false,\n                  \"max\":false,\n                  \"min\":false,\n
+    \                 \"show\":true,\n                  \"total\":false,\n                  \"values\":false\n
+    \              },\n               \"lines\":true,\n               \"linewidth\":1,\n
+    \              \"links\":[  \n\n               ],\n               \"nullPointMode\":\"null\",\n
+    \              \"percentage\":false,\n               \"pointradius\":5,\n               \"points\":false,\n
+    \              \"renderer\":\"flot\",\n               \"seriesOverrides\":[  \n\n
+    \              ],\n               \"spaceLength\":10,\n               \"stack\":false,\n
+    \              \"steppedLine\":true,\n               \"targets\":[  \n                  {
+    \ \n                     \"expr\":\"sum(autoscaler_actual_pods{namespace_name=\\\"$namespace\\\",
+    configuration_name=\\\"$configuration\\\", revision_name=\\\"$revision\\\"})\",\n
+    \                    \"format\":\"time_series\",\n                     \"interval\":\"1s\",\n
+    \                    \"intervalFactor\":1,\n                     \"legendFormat\":\"Actual
+    Pods\",\n                     \"refId\":\"A\"\n                  },\n                  {
+    \ \n                     \"expr\":\"sum(autoscaler_requested_pods{namespace_name=\\\"$namespace\\\",
+    configuration_name=\\\"$configuration\\\", revision_name=\\\"$revision\\\"})\",\n
+    \                    \"format\":\"time_series\",\n                     \"interval\":\"1s\",\n
+    \                    \"intervalFactor\":1,\n                     \"legendFormat\":\"Requested
+    Pods\",\n                     \"refId\":\"C\"\n                  }\n               ],\n
+    \              \"thresholds\":[  \n\n               ],\n               \"timeFrom\":null,\n
+    \              \"timeShift\":null,\n               \"title\":\"Revision Pod Counts\",\n
+    \              \"tooltip\":{  \n                  \"shared\":true,\n                  \"sort\":0,\n
+    \                 \"value_type\":\"individual\"\n               },\n               \"type\":\"graph\",\n
+    \              \"xaxis\":{  \n                  \"buckets\":null,\n                  \"mode\":\"time\",\n
+    \                 \"name\":null,\n                  \"show\":true,\n                  \"values\":[
+    \ \n\n                  ]\n               },\n               \"yaxes\":[  \n                  {
+    \ \n                     \"format\":\"short\",\n                     \"label\":null,\n
+    \                    \"logBase\":1,\n                     \"max\":null,\n                     \"min\":null,\n
+    \                    \"show\":true\n                  },\n                  {
+    \ \n                     \"decimals\":null,\n                     \"format\":\"short\",\n
+    \                    \"label\":\"Concurrency\",\n                     \"logBase\":1,\n
+    \                    \"max\":\"1\",\n                     \"min\":null,\n                     \"show\":false\n
+    \                 }\n               ]\n            }\n         ],\n         \"title\":\"Revision
+    Pod Counts\",\n         \"type\":\"row\"\n      },\n      {  \n         \"collapsed\":true,\n
+    \        \"gridPos\":{  \n            \"h\":1,\n            \"w\":24,\n            \"x\":0,\n
+    \           \"y\":1\n         },\n         \"id\":18,\n         \"panels\":[  \n
+    \           {  \n               \"aliasColors\":{  \n\n               },\n               \"bars\":false,\n
+    \              \"dashLength\":10,\n               \"dashes\":false,\n               \"datasource\":\"prometheus\",\n
+    \              \"fill\":1,\n               \"gridPos\":{  \n                  \"h\":9,\n
+    \                 \"w\":12,\n                  \"x\":0,\n                  \"y\":13\n
+    \              },\n               \"id\":4,\n               \"legend\":{  \n                  \"avg\":false,\n
+    \                 \"current\":false,\n                  \"max\":false,\n                  \"min\":false,\n
+    \                 \"show\":true,\n                  \"total\":false,\n                  \"values\":false\n
+    \              },\n               \"lines\":true,\n               \"linewidth\":1,\n
+    \              \"links\":[  \n\n               ],\n               \"nullPointMode\":\"null\",\n
+    \              \"percentage\":false,\n               \"pointradius\":5,\n               \"points\":false,\n
+    \              \"renderer\":\"flot\",\n               \"seriesOverrides\":[  \n\n
+    \              ],\n               \"spaceLength\":10,\n               \"stack\":false,\n
+    \              \"steppedLine\":false,\n               \"targets\":[  \n                  {
+    \ \n                     \"expr\":\"sum(kube_pod_container_resource_requests_cpu_cores{namespace=\\\"$namespace\\\",
+    pod=~\\\"$revision-deployment-.*\\\"})\",\n                     \"format\":\"time_series\",\n
+    \                    \"interval\":\"\",\n                     \"intervalFactor\":1,\n
+    \                    \"legendFormat\":\"Cores requested\",\n                     \"refId\":\"A\"\n
+    \                 },\n                  {  \n                     \"expr\":\"sum(rate(container_cpu_usage_seconds_total{namespace=\\\"$namespace\\\",
+    pod_name=~\\\"$revision-deployment-.*\\\"}[1m]))\",\n                     \"format\":\"time_series\",\n
+    \                    \"intervalFactor\":1,\n                     \"legendFormat\":\"Cores
+    used\",\n                     \"refId\":\"B\"\n                  },\n                  {
+    \ \n                     \"expr\":\"sum(kube_pod_container_resource_limits_cpu_cores{namespace=\\\"$namespace\\\",
+    pod=~\\\"$revision-deployment-.*\\\"})\",\n                     \"format\":\"time_series\",\n
+    \                    \"intervalFactor\":1,\n                     \"legendFormat\":\"Core
+    limit\",\n                     \"refId\":\"C\"\n                  }\n               ],\n
+    \              \"thresholds\":[  \n\n               ],\n               \"timeFrom\":null,\n
+    \              \"timeShift\":null,\n               \"title\":\"Revision CPU Usage\",\n
+    \              \"tooltip\":{  \n                  \"shared\":true,\n                  \"sort\":2,\n
+    \                 \"value_type\":\"individual\"\n               },\n               \"type\":\"graph\",\n
+    \              \"xaxis\":{  \n                  \"buckets\":null,\n                  \"mode\":\"time\",\n
+    \                 \"name\":null,\n                  \"show\":true,\n                  \"values\":[
+    \ \n\n                  ]\n               },\n               \"yaxes\":[  \n                  {
+    \ \n                     \"decimals\":null,\n                     \"format\":\"short\",\n
+    \                    \"label\":null,\n                     \"logBase\":1,\n                     \"max\":null,\n
+    \                    \"min\":null,\n                     \"show\":true\n                  },\n
+    \                 {  \n                     \"format\":\"short\",\n                     \"label\":null,\n
+    \                    \"logBase\":1,\n                     \"max\":null,\n                     \"min\":null,\n
+    \                    \"show\":false\n                  }\n               ]\n            },\n
+    \           {  \n               \"aliasColors\":{  \n\n               },\n               \"bars\":false,\n
+    \              \"dashLength\":10,\n               \"dashes\":false,\n               \"datasource\":\"prometheus\",\n
+    \              \"fill\":1,\n               \"gridPos\":{  \n                  \"h\":9,\n
+    \                 \"w\":12,\n                  \"x\":12,\n                  \"y\":13\n
+    \              },\n               \"id\":6,\n               \"legend\":{  \n                  \"avg\":false,\n
+    \                 \"current\":false,\n                  \"max\":false,\n                  \"min\":false,\n
+    \                 \"show\":true,\n                  \"total\":false,\n                  \"values\":false\n
+    \              },\n               \"lines\":true,\n               \"linewidth\":1,\n
+    \              \"links\":[  \n\n               ],\n               \"nullPointMode\":\"null\",\n
+    \              \"percentage\":false,\n               \"pointradius\":5,\n               \"points\":false,\n
+    \              \"renderer\":\"flot\",\n               \"seriesOverrides\":[  \n\n
+    \              ],\n               \"spaceLength\":10,\n               \"stack\":false,\n
+    \              \"steppedLine\":false,\n               \"targets\":[  \n                  {
+    \ \n                     \"expr\":\"sum(kube_pod_container_resource_requests_memory_bytes{namespace=\\\"$namespace\\\",
+    pod=~\\\"$revision-deployment-.*\\\"})\",\n                     \"format\":\"time_series\",\n
+    \                    \"interval\":\"\",\n                     \"intervalFactor\":1,\n
+    \                    \"legendFormat\":\"Memory requested\",\n                     \"refId\":\"A\"\n
+    \                 },\n                  {  \n                     \"expr\":\"sum(container_memory_usage_bytes{namespace=\\\"$namespace\\\",
+    pod_name=~\\\"$revision-deployment-.*\\\"})\",\n                     \"format\":\"time_series\",\n
+    \                    \"hide\":false,\n                     \"intervalFactor\":1,\n
+    \                    \"legendFormat\":\"Memory used\",\n                     \"refId\":\"B\"\n
+    \                 },\n                  {  \n                     \"expr\":\"sum(kube_pod_container_resource_limits_memory_bytes{namespace=\\\"$namespace\\\",
+    pod=~\\\"$revision-deployment-.*\\\"})\",\n                     \"format\":\"time_series\",\n
+    \                    \"intervalFactor\":1,\n                     \"refId\":\"C\"\n
+    \                 }\n               ],\n               \"thresholds\":[  \n\n
+    \              ],\n               \"timeFrom\":null,\n               \"timeShift\":null,\n
+    \              \"title\":\"Pod Memory Usage\",\n               \"tooltip\":{  \n
+    \                 \"shared\":true,\n                  \"sort\":2,\n                  \"value_type\":\"individual\"\n
+    \              },\n               \"type\":\"graph\",\n               \"xaxis\":{
+    \ \n                  \"buckets\":null,\n                  \"mode\":\"time\",\n
+    \                 \"name\":null,\n                  \"show\":true,\n                  \"values\":[
+    \ \n\n                  ]\n               },\n               \"yaxes\":[  \n                  {
+    \ \n                     \"format\":\"decbytes\",\n                     \"label\":null,\n
+    \                    \"logBase\":1,\n                     \"max\":null,\n                     \"min\":null,\n
+    \                    \"show\":true\n                  },\n                  {
+    \ \n                     \"format\":\"short\",\n                     \"label\":null,\n
+    \                    \"logBase\":1,\n                     \"max\":null,\n                     \"min\":null,\n
+    \                    \"show\":false\n                  }\n               ]\n            }\n
+    \        ],\n         \"title\":\"Resource Usages\",\n         \"type\":\"row\"\n
+    \     },\n      {  \n         \"collapsed\":true,\n         \"gridPos\":{  \n
+    \           \"h\":1,\n            \"w\":24,\n            \"x\":0,\n            \"y\":2\n
+    \        },\n         \"id\":16,\n         \"panels\":[  \n            {  \n               \"aliasColors\":{
+    \ \n\n               },\n               \"bars\":false,\n               \"dashLength\":10,\n
+    \              \"dashes\":false,\n               \"datasource\":\"prometheus\",\n
+    \              \"fill\":1,\n               \"gridPos\":{  \n                  \"h\":10,\n
+    \                 \"w\":24,\n                  \"x\":0,\n                  \"y\":3\n
+    \              },\n               \"id\":10,\n               \"legend\":{  \n
+    \                 \"avg\":false,\n                  \"current\":false,\n                  \"max\":false,\n
+    \                 \"min\":false,\n                  \"show\":true,\n                  \"total\":false,\n
+    \                 \"values\":false\n               },\n               \"lines\":true,\n
+    \              \"linewidth\":1,\n               \"links\":[  \n\n               ],\n
+    \              \"nullPointMode\":\"null\",\n               \"percentage\":false,\n
+    \              \"pointradius\":5,\n               \"points\":false,\n               \"renderer\":\"flot\",\n
+    \              \"seriesOverrides\":[  \n\n               ],\n               \"spaceLength\":10,\n
+    \              \"stack\":false,\n               \"steppedLine\":true,\n               \"targets\":[
+    \ \n                  {  \n                     \"expr\":\"sum(autoscaler_desired_pods{namespace_name=\\\"$namespace\\\",
+    configuration_name=\\\"$configuration\\\", revision_name=\\\"$revision\\\"}) \",\n
+    \                    \"format\":\"time_series\",\n                     \"intervalFactor\":1,\n
+    \                    \"legendFormat\":\"Desired Pods\",\n                     \"refId\":\"A\"\n
+    \                 },\n                  {  \n                     \"expr\":\"sum(autoscaler_observed_pods{namespace_name=\\\"$namespace\\\",
+    configuration_name=\\\"$configuration\\\", revision_name=\\\"$revision\\\"})\",\n
+    \                    \"format\":\"time_series\",\n                     \"intervalFactor\":1,\n
+    \                    \"legendFormat\":\"Observed Pods\",\n                     \"refId\":\"B\"\n
+    \                 }\n               ],\n               \"thresholds\":[  \n\n
+    \              ],\n               \"timeFrom\":null,\n               \"timeShift\":null,\n
+    \              \"title\":\"Pod Counts\",\n               \"tooltip\":{  \n                  \"shared\":true,\n
+    \                 \"sort\":0,\n                  \"value_type\":\"individual\"\n
+    \              },\n               \"type\":\"graph\",\n               \"xaxis\":{
+    \ \n                  \"buckets\":null,\n                  \"mode\":\"time\",\n
+    \                 \"name\":null,\n                  \"show\":true,\n                  \"values\":[
+    \ \n\n                  ]\n               },\n               \"yaxes\":[  \n                  {
+    \ \n                     \"format\":\"short\",\n                     \"label\":null,\n
+    \                    \"logBase\":1,\n                     \"max\":null,\n                     \"min\":null,\n
+    \                    \"show\":true\n                  },\n                  {
+    \ \n                     \"format\":\"short\",\n                     \"label\":null,\n
+    \                    \"logBase\":1,\n                     \"max\":null,\n                     \"min\":null,\n
+    \                    \"show\":true\n                  }\n               ]\n            },\n
+    \           {  \n               \"aliasColors\":{  \n\n               },\n               \"bars\":false,\n
+    \              \"dashLength\":10,\n               \"dashes\":false,\n               \"datasource\":\"prometheus\",\n
+    \              \"fill\":1,\n               \"gridPos\":{  \n                  \"h\":9,\n
+    \                 \"w\":24,\n                  \"x\":0,\n                  \"y\":13\n
+    \              },\n               \"id\":8,\n               \"legend\":{  \n                  \"avg\":false,\n
+    \                 \"current\":false,\n                  \"max\":false,\n                  \"min\":false,\n
+    \                 \"show\":true,\n                  \"total\":false,\n                  \"values\":false\n
+    \              },\n               \"lines\":true,\n               \"linewidth\":1,\n
+    \              \"links\":[  \n\n               ],\n               \"nullPointMode\":\"null\",\n
+    \              \"percentage\":false,\n               \"pointradius\":5,\n               \"points\":false,\n
+    \              \"renderer\":\"flot\",\n               \"seriesOverrides\":[  \n
+    \                 {  \n                     \"alias\":\"Panic Mode\",\n                     \"color\":\"#ea6460\",\n
+    \                    \"dashes\":true,\n                     \"fill\":2,\n                     \"linewidth\":2,\n
+    \                    \"steppedLine\":true,\n                     \"yaxis\":2\n
+    \                 },\n                  {  \n                     \"alias\":\"Target
+    Concurrency Per Pod\",\n                     \"color\":\"#0a50a1\",\n                     \"dashes\":true,\n
+    \                    \"steppedLine\":false\n                  }\n               ],\n
+    \              \"spaceLength\":10,\n               \"stack\":false,\n               \"steppedLine\":true,\n
+    \              \"targets\":[  \n                  {  \n                     \"expr\":\"sum(autoscaler_stable_request_concurrency{namespace_name=\\\"$namespace\\\",
+    configuration_name=\\\"$configuration\\\", revision_name=\\\"$revision\\\"})\",\n
+    \                    \"format\":\"time_series\",\n                     \"interval\":\"1s\",\n
+    \                    \"intervalFactor\":1,\n                     \"legendFormat\":\"60
+    Second Average Concurrency\",\n                     \"refId\":\"A\"\n                  },\n
+    \                 {  \n                     \"expr\":\"sum(autoscaler_panic_request_concurrency{namespace_name=\\\"$namespace\\\",
+    configuration_name=\\\"$configuration\\\", revision_name=\\\"$revision\\\"})\",\n
+    \                    \"format\":\"time_series\",\n                     \"interval\":\"1s\",\n
+    \                    \"intervalFactor\":1,\n                     \"legendFormat\":\"6
+    Second Average Panic Concurrency\",\n                     \"refId\":\"B\"\n                  },\n
+    \                 {  \n                     \"expr\":\"sum(autoscaler_target_concurrency_per_pod{namespace_name=\\\"$namespace\\\",
+    configuration_name=\\\"$configuration\\\", revision_name=\\\"$revision\\\"})\",\n
+    \                    \"format\":\"time_series\",\n                     \"intervalFactor\":1,\n
+    \                    \"legendFormat\":\"60 Second Target Concurrency\",\n                     \"refId\":\"C\"\n
+    \                 }\n               ],\n               \"thresholds\":[  \n\n
+    \              ],\n               \"timeFrom\":null,\n               \"timeShift\":null,\n
+    \              \"title\":\"Observed Concurrency\",\n               \"tooltip\":{
+    \ \n                  \"shared\":true,\n                  \"sort\":0,\n                  \"value_type\":\"individual\"\n
+    \              },\n               \"type\":\"graph\",\n               \"xaxis\":{
+    \ \n                  \"buckets\":null,\n                  \"mode\":\"time\",\n
+    \                 \"name\":null,\n                  \"show\":true,\n                  \"values\":[
+    \ \n\n                  ]\n               },\n               \"yaxes\":[  \n                  {
+    \ \n                     \"format\":\"short\",\n                     \"label\":\"\",\n
+    \                    \"logBase\":1,\n                     \"max\":null,\n                     \"min\":null,\n
+    \                    \"show\":true\n                  },\n                  {
+    \ \n                     \"format\":\"short\",\n                     \"label\":\"\",\n
+    \                    \"logBase\":1,\n                     \"max\":null,\n                     \"min\":null,\n
+    \                    \"show\":false\n                  }\n               ]\n            },\n
+    \           {  \n               \"aliasColors\":{  \n\n               },\n               \"bars\":false,\n
+    \              \"dashLength\":10,\n               \"dashes\":false,\n               \"datasource\":\"prometheus\",\n
+    \              \"decimals\":null,\n               \"fill\":1,\n               \"gridPos\":{
+    \ \n                  \"h\":9,\n                  \"w\":24,\n                  \"x\":0,\n
+    \                 \"y\":22\n               },\n               \"id\":12,\n               \"legend\":{
+    \ \n                  \"avg\":false,\n                  \"current\":false,\n                  \"hideZero\":false,\n
+    \                 \"max\":false,\n                  \"min\":false,\n                  \"show\":false,\n
+    \                 \"total\":false,\n                  \"values\":false\n               },\n
+    \              \"lines\":true,\n               \"linewidth\":1,\n               \"links\":[
+    \ \n\n               ],\n               \"nullPointMode\":\"null\",\n               \"percentage\":false,\n
+    \              \"pointradius\":5,\n               \"points\":false,\n               \"renderer\":\"flot\",\n
+    \              \"seriesOverrides\":[  \n                  {  \n                     \"alias\":\"Panic
+    Mode\",\n                     \"color\":\"#e24d42\",\n                     \"linewidth\":2,\n
+    \                    \"yaxis\":2\n                  }\n               ],\n               \"spaceLength\":10,\n
+    \              \"stack\":false,\n               \"steppedLine\":true,\n               \"targets\":[
+    \ \n                  {  \n                     \"expr\":\"sum(autoscaler_panic_mode{namespace_name=\\\"$namespace\\\",
+    configuration_name=\\\"$configuration\\\", revision_name=\\\"$revision\\\"} )\",\n
+    \                    \"format\":\"time_series\",\n                     \"intervalFactor\":1,\n
+    \                    \"legendFormat\":\"Panic Mode\",\n                     \"refId\":\"A\"\n
+    \                 }\n               ],\n               \"thresholds\":[  \n\n
+    \              ],\n               \"timeFrom\":null,\n               \"timeShift\":null,\n
+    \              \"title\":\"Panic Mode\",\n               \"tooltip\":{  \n                  \"shared\":true,\n
+    \                 \"sort\":0,\n                  \"value_type\":\"individual\"\n
+    \              },\n               \"type\":\"graph\",\n               \"xaxis\":{
+    \ \n                  \"buckets\":null,\n                  \"mode\":\"time\",\n
+    \                 \"name\":null,\n                  \"show\":true,\n                  \"values\":[
+    \ \n\n                  ]\n               },\n               \"yaxes\":[  \n                  {
+    \ \n                     \"format\":\"short\",\n                     \"label\":null,\n
+    \                    \"logBase\":1,\n                     \"max\":\"1.0\",\n                     \"min\":\"0\",\n
+    \                    \"show\":true\n                  },\n                  {
+    \ \n                     \"format\":\"short\",\n                     \"label\":null,\n
+    \                    \"logBase\":1,\n                     \"max\":null,\n                     \"min\":null,\n
+    \                    \"show\":false\n                  }\n               ]\n            }\n
+    \        ],\n         \"title\":\"Autoscaler Metrics\",\n         \"type\":\"row\"\n
+    \     },\n      {  \n         \"collapsed\":true,\n         \"gridPos\":{  \n
+    \           \"h\":1,\n            \"w\":24,\n            \"x\":0,\n            \"y\":3\n
+    \        },\n         \"id\":20,\n         \"panels\":[  \n                     {
+    \ \n                        \"aliasColors\":{  \n\n                        },\n
+    \                       \"bars\":false,\n                        \"dashLength\":10,\n
+    \                       \"dashes\":false,\n                        \"datasource\":\"prometheus\",\n
+    \                       \"fill\":1,\n                        \"gridPos\":{  \n
+    \                          \"h\":10,\n                           \"w\":24,\n                           \"x\":0,\n
+    \                          \"y\":12\n                        },\n                        \"id\":24,\n
+    \                       \"legend\":{  \n                           \"avg\":false,\n
+    \                          \"current\":false,\n                           \"max\":false,\n
+    \                          \"min\":false,\n                           \"show\":true,\n
+    \                          \"total\":false,\n                           \"values\":false\n
+    \                       },\n                        \"lines\":true,\n                        \"linewidth\":1,\n
+    \                       \"links\":[  \n\n                        ],\n                        \"nullPointMode\":\"null\",\n
+    \                       \"percentage\":false,\n                        \"pointradius\":5,\n
+    \                       \"points\":false,\n                        \"renderer\":\"flot\",\n
+    \                       \"seriesOverrides\":[  \n\n                        ],\n
+    \                       \"spaceLength\":10,\n                        \"stack\":false,\n
+    \                       \"steppedLine\":false,\n                        \"targets\":[
+    \ \n                           {  \n                              \"expr\":\"round(sum(increase(activator_request_count{namespace_name=\\\"$namespace\\\",
+    configuration_name=~\\\"$configuration\\\",revision_name=~\\\"$revision\\\"}[1m]))
+    by (response_code))\",\n                              \"format\":\"time_series\",\n
+    \                             \"intervalFactor\":1,\n                              \"legendFormat\":\"{{
+    response_code }}\",\n                              \"refId\":\"A\"\n                           }\n
+    \                       ],\n                        \"thresholds\":[  \n\n                        ],\n
+    \                       \"timeFrom\":null,\n                        \"timeShift\":null,\n
+    \                       \"title\":\"Request Count in last minute by Response Code\",\n
+    \                       \"tooltip\":{  \n                           \"shared\":true,\n
+    \                          \"sort\":0,\n                           \"value_type\":\"individual\"\n
+    \                       },\n                        \"type\":\"graph\",\n                        \"xaxis\":{
+    \ \n                           \"buckets\":null,\n                           \"mode\":\"time\",\n
+    \                          \"name\":null,\n                           \"show\":true,\n
+    \                          \"values\":[  \n\n                           ]\n                        },\n
+    \                       \"yaxes\":[  \n                           {  \n                              \"format\":\"none\",\n
+    \                             \"label\":null,\n                              \"logBase\":1,\n
+    \                             \"max\":null,\n                              \"min\":\"0\",\n
+    \                             \"show\":true\n                           },\n                           {
+    \ \n                              \"format\":\"short\",\n                              \"label\":null,\n
+    \                             \"logBase\":1,\n                              \"max\":null,\n
+    \                             \"min\":null,\n                              \"show\":true\n
+    \                          }\n                        ]\n                     },\n
+    \                    {  \n                        \"aliasColors\":{  \n\n                        },\n
+    \                       \"bars\":false,\n                        \"dashLength\":10,\n
+    \                       \"dashes\":false,\n                        \"datasource\":\"prometheus\",\n
+    \                       \"fill\":1,\n                        \"gridPos\":{  \n
+    \                          \"h\":10,\n                           \"w\":24,\n                           \"x\":0,\n
+    \                          \"y\":32\n                        },\n                        \"id\":28,\n
+    \                       \"legend\":{  \n                           \"avg\":true,\n
+    \                          \"current\":false,\n                           \"max\":false,\n
+    \                          \"min\":false,\n                           \"show\":true,\n
+    \                          \"total\":false,\n                           \"values\":true\n
+    \                       },\n                        \"lines\":true,\n                        \"linewidth\":1,\n
+    \                       \"links\":[  \n\n                        ],\n                        \"nullPointMode\":\"null\",\n
+    \                       \"percentage\":false,\n                        \"pointradius\":5,\n
+    \                       \"points\":false,\n                        \"renderer\":\"flot\",\n
+    \                       \"seriesOverrides\":[  \n\n                        ],\n
+    \                       \"spaceLength\":10,\n                        \"stack\":false,\n
+    \                       \"steppedLine\":false,\n                        \"targets\":[
+    \ \n                           {  \n                              \"expr\":\"label_replace(histogram_quantile(0.50,
+    sum(rate(activator_request_latencies_bucket{namespace_name=\\\"$namespace\\\",
+    configuration_name=~\\\"$configuration\\\",revision_name=~\\\"$revision\\\"}[1m]))
+    by (revision_name, le)), \\\"revision_name\\\", \\\"$2\\\", \\\"revision_name\\\",
+    \\\"$configuration(-+)(.*)\\\")\",\n                              \"format\":\"time_series\",\n
+    \                             \"intervalFactor\":1,\n                              \"legendFormat\":\"{{
+    revision_name }} (p50)\",\n                              \"refId\":\"A\"\n                           },\n
+    \                          {  \n                              \"expr\":\"label_replace(histogram_quantile(0.90,
+    sum(rate(activator_request_latencies_bucket{namespace_name=\\\"$namespace\\\",
+    configuration_name=~\\\"$configuration\\\",revision_name=~\\\"$revision\\\"}[1m]))
+    by (revision_name, le)), \\\"revision_name\\\", \\\"$2\\\", \\\"revision_name\\\",
+    \\\"$configuration(-+)(.*)\\\")\",\n                              \"format\":\"time_series\",\n
+    \                             \"intervalFactor\":1,\n                              \"legendFormat\":\"{{
+    revision_name }} (p90)\",\n                              \"refId\":\"B\"\n                           },\n
+    \                          {  \n                              \"expr\":\"label_replace(histogram_quantile(0.95,
+    sum(rate(activator_request_latencies_bucket{namespace_name=\\\"$namespace\\\",
+    configuration_name=~\\\"$configuration\\\",revision_name=~\\\"$revision\\\"}[1m]))
+    by (revision_name, le)), \\\"revision_name\\\", \\\"$2\\\", \\\"revision_name\\\",
+    \\\"$configuration(-+)(.*)\\\")\",\n                              \"format\":\"time_series\",\n
+    \                             \"intervalFactor\":1,\n                              \"legendFormat\":\"{{
+    revision_name }} (p95)\",\n                              \"refId\":\"C\"\n                           },\n
+    \                          {  \n                              \"expr\":\"label_replace(histogram_quantile(0.99,
+    sum(rate(activator_request_latencies_bucket{namespace_name=\\\"$namespace\\\",
+    configuration_name=~\\\"$configuration\\\",revision_name=~\\\"$revision\\\"}[1m]))
+    by (revision_name, le)), \\\"revision_name\\\", \\\"$2\\\", \\\"revision_name\\\",
+    \\\"$configuration(-+)(.*)\\\")\",\n                              \"format\":\"time_series\",\n
+    \                             \"intervalFactor\":1,\n                              \"legendFormat\":\"{{
+    revision_name }} (p99)\",\n                              \"refId\":\"D\"\n                           }\n
+    \                       ],\n                        \"thresholds\":[  \n\n                        ],\n
+    \                       \"timeFrom\":null,\n                        \"timeShift\":null,\n
+    \                       \"title\":\"Response Time in last minute\",\n                        \"tooltip\":{
+    \ \n                           \"shared\":true,\n                           \"sort\":0,\n
+    \                          \"value_type\":\"individual\"\n                        },\n
+    \                       \"type\":\"graph\",\n                        \"xaxis\":{
+    \ \n                           \"buckets\":null,\n                           \"mode\":\"time\",\n
+    \                          \"name\":null,\n                           \"show\":true,\n
+    \                          \"values\":[  \n\n                           ]\n                        },\n
+    \                       \"yaxes\":[  \n                           {  \n                              \"format\":\"ms\",\n
+    \                             \"label\":null,\n                              \"logBase\":1,\n
+    \                             \"max\":null,\n                              \"min\":null,\n
+    \                             \"show\":true\n                           },\n                           {
+    \ \n                              \"format\":\"short\",\n                              \"label\":null,\n
+    \                             \"logBase\":1,\n                              \"max\":null,\n
+    \                             \"min\":null,\n                              \"show\":true\n
+    \                          }\n                         ]\n                       }
+    \    \n         ],\n         \"title\":\"Activator Metrics\",\n         \"type\":\"row\"\n
+    \     }\n   ],\n   \"refresh\":false,\n   \"schemaVersion\":16,\n   \"style\":\"dark\",\n
+    \  \"tags\":[  \n\n   ],\n   \"templating\":{  \n      \"list\":[  \n         {
+    \ \n            \"allValue\":null,\n            \"current\":{  \n\n            },\n
+    \           \"datasource\":\"prometheus\",\n            \"hide\":0,\n            \"includeAll\":false,\n
+    \           \"label\":\"Namespace\",\n            \"multi\":false,\n            \"name\":\"namespace\",\n
+    \           \"options\":[  \n\n            ],\n            \"query\":\"label_values(autoscaler_observed_pods,
+    namespace_name)\",\n            \"refresh\":1,\n            \"regex\":\"\",\n
+    \           \"sort\":1,\n            \"tagValuesQuery\":\"\",\n            \"tags\":[
+    \ \n\n            ],\n            \"tagsQuery\":\"\",\n            \"type\":\"query\",\n
+    \           \"useTags\":false\n         },\n         {  \n            \"allValue\":null,\n
+    \           \"current\":{  \n\n            },\n            \"datasource\":\"prometheus\",\n
+    \           \"hide\":0,\n            \"includeAll\":false,\n            \"label\":\"Configuration\",\n
+    \           \"multi\":false,\n            \"name\":\"configuration\",\n            \"options\":[
+    \ \n\n            ],\n            \"query\":\"label_values(autoscaler_observed_pods{namespace_name=\\\"$namespace\\\"},
+    configuration_name)\",\n            \"refresh\":1,\n            \"regex\":\"\",\n
+    \           \"sort\":1,\n            \"tagValuesQuery\":\"\",\n            \"tags\":[
+    \ \n\n            ],\n            \"tagsQuery\":\"\",\n            \"type\":\"query\",\n
+    \           \"useTags\":false\n         },\n         {  \n            \"allValue\":null,\n
+    \           \"current\":{  \n\n            },\n            \"datasource\":\"prometheus\",\n
+    \           \"hide\":0,\n            \"includeAll\":false,\n            \"label\":\"Revision\",\n
+    \           \"multi\":false,\n            \"name\":\"revision\",\n            \"options\":[
+    \ \n\n            ],\n            \"query\":\"label_values(autoscaler_observed_pods{namespace_name=\\\"$namespace\\\",
+    configuration_name=\\\"$configuration\\\"}, revision_name)\",\n            \"refresh\":1,\n
+    \           \"regex\":\"\",\n            \"sort\":2,\n            \"tagValuesQuery\":\"\",\n
+    \           \"tags\":[  \n\n            ],\n            \"tagsQuery\":\"\",\n
+    \           \"type\":\"query\",\n            \"useTags\":false\n         }\n      ]\n
+    \  },\n   \"time\":{  \n      \"from\":\"now-15m\",\n      \"to\":\"now\"\n   },\n
+    \  \"timepicker\":{  \n      \"refresh_intervals\":[  \n         \"5s\",\n         \"10s\",\n
+    \        \"30s\",\n         \"1m\",\n         \"5m\",\n         \"15m\",\n         \"30m\",\n
+    \        \"1h\",\n         \"2h\",\n         \"1d\"\n      ],\n      \"time_options\":[
+    \ \n         \"5m\",\n         \"15m\",\n         \"1h\",\n         \"6h\",\n
+    \        \"12h\",\n         \"24h\",\n         \"2d\",\n         \"7d\",\n         \"30d\"\n
+    \     ]\n   },\n   \"timezone\":\"\",\n   \"title\":\"Knative Serving - Scaling
+    Debugging\",\n   \"uid\":\"u_-9SIMiz\",\n   \"version\":2\n}\n"
+kind: ConfigMap
+metadata:
+  name: scaling-config
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -15715,7 +14887,8 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-definition-knative
-  namespace: monitoring
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 data:
@@ -15731,7 +14904,7 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-datasources
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
 apiVersion: v1
 data:
@@ -15748,6 +14921,12 @@ data:
       type: file
       options:
         folder: /grafana-dashboard-definition/knative-efficiency
+    - name: 'knative-reconciler'
+      org_id: 1
+      folder: ''
+      type: file
+      options:
+        folder: /grafana-dashboard-definition/knative-reconciler
     - name: 'istio'
       org_id: 1
       folder: ''
@@ -15829,7 +15008,7 @@ data:
 kind: ConfigMap
 metadata:
   name: grafana-dashboards
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
 apiVersion: v1
 kind: Service
@@ -15837,7 +15016,7 @@ metadata:
   labels:
     app: grafana
   name: grafana
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   ports:
   - port: 30802
@@ -15847,13 +15026,16 @@ spec:
     app: grafana
   type: NodePort
 ---
-apiVersion: apps/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: grafana
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
   template:
     metadata:
       labels:
@@ -15883,6 +15065,8 @@ spec:
           name: grafana-dashboard-definition-knative
         - mountPath: /grafana-dashboard-definition/knative-efficiency
           name: grafana-dashboard-definition-knative-efficiency
+        - mountPath: /grafana-dashboard-definition/knative-reconciler
+          name: grafana-dashboard-definition-knative-reconciler
         - mountPath: /grafana-dashboard-definition/istio
           name: grafana-dashboard-definition-istio
         - mountPath: /grafana-dashboard-definition/mixer
@@ -15928,6 +15112,9 @@ spec:
           name: grafana-dashboard-definition-knative-efficiency
         name: grafana-dashboard-definition-knative-efficiency
       - configMap:
+          name: grafana-dashboard-definition-knative-reconciler
+        name: grafana-dashboard-definition-knative-reconciler
+      - configMap:
           name: grafana-dashboard-definition-istio
         name: grafana-dashboard-definition-istio
       - configMap:
@@ -15967,55 +15154,7 @@ spec:
           name: scaling-config
         name: scaling-config
 --- null
----
-apiVersion: config.istio.io/v1alpha2
-kind: logentry
-metadata:
-  name: requestlog
-  namespace: istio-system
-spec:
-  monitored_resource_type: '"UNSPECIFIED"'
-  severity: '"Info"'
-  timestamp: request.time
-  variables:
-    destinationConfiguration: destination.labels["serving.knative.dev/configuration"]
-      | "unknown"
-    destinationNamespace: destination.namespace | ""
-    destinationRevision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destinationService: destination.service | ""
-    latency: response.duration | "0ms"
-    method: request.method | ""
-    protocol: request.scheme | "http"
-    referer: request.referer | "unknown"
-    requestHost: request.host | ""
-    requestSize: request.size | 0
-    responseCode: response.code | 0
-    responseSize: response.size | 0
-    sourceNamespace: source.namespace | "unknown"
-    sourceService: source.service | "unknown"
-    traceId: request.headers["x-b3-traceid"] | "unknown"
-    url: request.path | ""
-    userAgent: request.useragent | "unknown"
----
-apiVersion: config.istio.io/v1alpha2
-kind: fluentd
-metadata:
-  name: requestloghandler
-  namespace: istio-system
-spec:
-  address: fluentd-ds.monitoring:24224
----
-apiVersion: config.istio.io/v1alpha2
-kind: rule
-metadata:
-  name: requestlogtofluentd
-  namespace: istio-system
-spec:
-  actions:
-  - handler: requestloghandler.fluentd
-    instances:
-    - requestlog.logentry
-  match: "true"
+
 ---
 apiVersion: config.istio.io/v1alpha2
 kind: metric
@@ -16026,11 +15165,12 @@ spec:
   dimensions:
     destination_configuration: destination.labels["serving.knative.dev/configuration"]
       | "unknown"
+    destination_k8s_service: destination.service | "unknown"
     destination_namespace: destination.namespace | "unknown"
     destination_revision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destination_service: destination.service | "unknown"
+    destination_service: destination.labels["serving.knative.dev/service"] | "unknown"
     response_code: response.code | 200
-    source_service: source.service | "unknown"
+    source_k8s_service: source.service | "unknown"
   monitored_resource_type: '"UNSPECIFIED"'
   value: "1"
 ---
@@ -16043,11 +15183,12 @@ spec:
   dimensions:
     destination_configuration: destination.labels["serving.knative.dev/configuration"]
       | "unknown"
+    destination_k8s_service: destination.service | "unknown"
     destination_namespace: destination.namespace | "unknown"
     destination_revision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destination_service: destination.service | "unknown"
+    destination_service: destination.labels["serving.knative.dev/service"] | "unknown"
     response_code: response.code | 200
-    source_service: source.service | "unknown"
+    source_k8s_service: source.service | "unknown"
   monitored_resource_type: '"UNSPECIFIED"'
   value: response.duration | "0ms"
 ---
@@ -16060,11 +15201,12 @@ spec:
   dimensions:
     destination_configuration: destination.labels["serving.knative.dev/configuration"]
       | "unknown"
+    destination_k8s_service: destination.service | "unknown"
     destination_namespace: destination.namespace | "unknown"
     destination_revision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destination_service: destination.service | "unknown"
+    destination_service: destination.labels["serving.knative.dev/service"] | "unknown"
     response_code: response.code | 200
-    source_service: source.service | "unknown"
+    source_k8s_service: source.service | "unknown"
   monitored_resource_type: '"UNSPECIFIED"'
   value: request.size | 0
 ---
@@ -16077,11 +15219,12 @@ spec:
   dimensions:
     destination_configuration: destination.labels["serving.knative.dev/configuration"]
       | "unknown"
+    destination_k8s_service: destination.service | "unknown"
     destination_namespace: destination.namespace | "unknown"
     destination_revision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destination_service: destination.service | "unknown"
+    destination_service: destination.labels["serving.knative.dev/service"] | "unknown"
     response_code: response.code | 200
-    source_service: source.service | "unknown"
+    source_k8s_service: source.service | "unknown"
   monitored_resource_type: '"UNSPECIFIED"'
   value: response.size | 0
 ---
@@ -16095,11 +15238,12 @@ spec:
   - instance_name: revisionrequestcount.metric.istio-system
     kind: COUNTER
     label_names:
-    - source_service
+    - source_k8s_service
+    - destination_k8s_service
     - destination_namespace
-    - destination_service
     - destination_revision
     - destination_configuration
+    - destination_service
     - response_code
     name: revision_request_count
   - buckets:
@@ -16119,11 +15263,12 @@ spec:
     instance_name: revisionrequestduration.metric.istio-system
     kind: DISTRIBUTION
     label_names:
-    - source_service
+    - source_k8s_service
+    - destination_k8s_service
     - destination_namespace
-    - destination_service
     - destination_revision
     - destination_configuration
+    - destination_service
     - response_code
     name: revision_request_duration
   - buckets:
@@ -16134,11 +15279,12 @@ spec:
     instance_name: revisionrequestsize.metric.istio-system
     kind: DISTRIBUTION
     label_names:
-    - source_service
+    - source_k8s_service
+    - destination_k8s_service
     - destination_namespace
-    - destination_service
     - destination_revision
     - destination_configuration
+    - destination_service
     - response_code
     name: revision_request_size
   - buckets:
@@ -16149,11 +15295,12 @@ spec:
     instance_name: revisionresponsesize.metric.istio-system
     kind: DISTRIBUTION
     label_names:
-    - source_service
+    - source_k8s_service
+    - destination_k8s_service
     - destination_namespace
-    - destination_service
     - destination_revision
     - destination_configuration
+    - destination_service
     - response_code
     name: revision_response_size
 ---
@@ -16173,54 +15320,201 @@ spec:
     - revisionrequestsize.metric
     - revisionresponsesize.metric
 --- null
+
 ---
 apiVersion: v1
-kind: Service
+data:
+  prometheus.yml: "global:\n  scrape_interval: 30s\n  scrape_timeout: 10s\n  evaluation_interval:
+    30s\nscrape_configs:\n# Controller endpoint\n- job_name: controller\n  scrape_interval:
+    3s\n  scrape_timeout: 3s\n  kubernetes_sd_configs:\n  - role: pod\n  relabel_configs:\n
+    \ # Scrape only the the targets matching the following metadata\n  - source_labels:
+    [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_app, __meta_kubernetes_pod_container_port_name]\n
+    \   action: keep\n    regex: knative-serving;controller;metrics\n  # Rename metadata
+    labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Autoscaler endpoint\n- job_name: autoscaler\n  scrape_interval: 3s\n  scrape_timeout:
+    3s\n  kubernetes_sd_configs:\n  - role: pod\n  relabel_configs:\n  # Scrape only
+    the the targets matching the following metadata\n  - source_labels: [__meta_kubernetes_namespace,
+    __meta_kubernetes_pod_label_app, __meta_kubernetes_pod_container_port_name]\n
+    \   action: keep\n    regex: knative-serving;autoscaler;metrics\n  # Rename metadata
+    labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Activator pods\n- job_name: activator\n  scrape_interval: 3s\n  scrape_timeout:
+    3s\n  kubernetes_sd_configs:\n  - role: pod\n  relabel_configs:\n  # Scrape only
+    the the targets matching the following metadata\n  - source_labels: [__meta_kubernetes_namespace,
+    __meta_kubernetes_pod_label_app, __meta_kubernetes_pod_container_port_name]\n
+    \   action: keep\n    regex: knative-serving;activator;metrics-port\n  # Rename
+    metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1        \n# Fluentd daemonset\n- job_name: fluentd-ds\n  kubernetes_sd_configs:\n
+    \ - role: endpoints\n  relabel_configs:\n  # Scrape only the the targets matching
+    the following metadata\n  - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: knative-monitoring;fluentd-ds;prometheus-metrics\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Istio mesh\n- job_name: istio-mesh\n  scrape_interval: 5s\n  kubernetes_sd_configs:\n
+    \ - role: endpoints\n  relabel_configs:\n  # Scrape only the the targets matching
+    the following metadata\n  - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: istio-system;istio-telemetry;prometheus\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Istio Envoy\n# These are very noisy and not enabled by default.\n# - job_name:
+    istio-envoy\n#   scrape_interval: 5s\n#   kubernetes_sd_configs:\n#   - role:
+    endpoints\n#   relabel_configs:\n#   # Scrape only the the targets matching the
+    following metadata\n#   - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name,
+    __meta_kubernetes_endpoint_port_name]\n#     action: keep\n#     regex: istio-system;istio-statsd-prom-bridge;statsd-prom\n#
+    \  # Rename metadata labels to be reader friendly\n#   - source_labels: [__meta_kubernetes_namespace]\n#
+    \    action: replace\n#     regex: (.*)\n#     target_label: namespace\n#     replacement:
+    $1\n#   - source_labels: [__meta_kubernetes_pod_name]\n#     action: replace\n#
+    \    regex: (.*)\n#     target_label: pod\n#     replacement: $1\n#   - source_labels:
+    [__meta_kubernetes_service_name]\n#     action: replace\n#     regex: (.*)\n#
+    \    target_label: service\n#     replacement: $1\n# Istio policy\n- job_name:
+    istio-policy\n  scrape_interval: 5s\n  kubernetes_sd_configs:\n  - role: endpoints\n
+    \ relabel_configs:\n  # Scrape only the the targets matching the following metadata\n
+    \ - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: istio-system;istio-policy;http-monitoring\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Istio telemetry\n- job_name: istio-telemetry\n  scrape_interval: 5s\n  kubernetes_sd_configs:\n
+    \ - role: endpoints\n  relabel_configs:\n  # Scrape only the the targets matching
+    the following metadata\n  - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: istio-system;istio-telemetry;http-monitoring\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Istio pilot\n- job_name: istio-pilot\n  scrape_interval: 5s\n  kubernetes_sd_configs:\n
+    \ - role: endpoints\n  relabel_configs:\n  # Scrape only the the targets matching
+    the following metadata\n  - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: istio-system;istio-pilot;http-monitoring\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Kube API server\n- job_name: kube-apiserver\n  scheme: https\n  kubernetes_sd_configs:\n
+    \ - role: endpoints\n  bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token\n
+    \ tls_config:\n    ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt\n
+    \   server_name: kubernetes\n    insecure_skip_verify: false\n  relabel_configs:\n
+    \ # Scrape only the the targets matching the following metadata\n  - source_labels:
+    [__meta_kubernetes_namespace, __meta_kubernetes_service_label_component, __meta_kubernetes_service_label_provider,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: default;apiserver;kubernetes;https\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Kube controller manager\n- job_name: kube-controller-manager\n  kubernetes_sd_configs:\n
+    \ - role: endpoints\n  relabel_configs:\n  # Scrape only the the targets matching
+    the following metadata\n  - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: knative-monitoring;kube-controller-manager;http-metrics\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Kube scheduler\n- job_name: kube-scheduler\n  kubernetes_sd_configs:\n  -
+    role: endpoints\n  relabel_configs:\n  # Scrape only the the targets matching
+    the following metadata\n  - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_k8s_app,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: kube-system;kube-scheduler;http-metrics\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Kube state metrics on https-main port\n- job_name: kube-state-metrics-https-main\n
+    \ honor_labels: true\n  scheme: https\n  kubernetes_sd_configs:\n  - role: endpoints\n
+    \ bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token\n  tls_config:\n
+    \   insecure_skip_verify: true\n  relabel_configs:\n  # Scrape only the the targets
+    matching the following metadata\n  - source_labels: [__meta_kubernetes_namespace,
+    __meta_kubernetes_service_label_app, __meta_kubernetes_endpoint_port_name]\n    action:
+    keep\n    regex: knative-monitoring;kube-state-metrics;https-main\n  # Rename
+    metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Kube state metrics on https-self port\n- job_name: kube-state-metrics-https-self\n
+    \ scheme: https\n  kubernetes_sd_configs:\n  - role: endpoints\n  bearer_token_file:
+    /var/run/secrets/kubernetes.io/serviceaccount/token\n  tls_config:\n    insecure_skip_verify:
+    true\n  relabel_configs:\n  # Scrape only the the targets matching the following
+    metadata\n  - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: knative-monitoring;kube-state-metrics;https-self\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Kubelet - nodes\n# Rather than connecting directly to the node, the scrape
+    is proxied though the\n# Kubernetes apiserver.  This means it will work if Prometheus
+    is running out of\n# cluster, or can't connect to nodes for some other reason
+    (e.g. because of\n# firewalling).\n- job_name: kubernetes-nodes\n  scheme: https\n
+    \ tls_config:\n    ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt\n
+    \ bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token\n  kubernetes_sd_configs:\n
+    \ - role: node\n  relabel_configs:\n  - action: labelmap\n    regex: __meta_kubernetes_node_label_(.+)\n
+    \ - target_label: __address__\n    replacement: kubernetes.default.svc:443\n  -
+    source_labels: [__meta_kubernetes_node_name]\n    regex: (.+)\n    target_label:
+    __metrics_path__\n    replacement: /api/v1/nodes/${1}/proxy/metrics\n# Kubelet
+    - cAdvisor\n#\n# This is required for Kubernetes 1.7.3 and later, where cAdvisor
+    metrics\n# (those whose names begin with 'container_') have been removed from
+    the\n# Kubelet metrics endpoint.  This job scrapes the cAdvisor endpoint to\n#
+    retrieve those metrics.\n#\n# In Kubernetes 1.7.0-1.7.2, these metrics are only
+    exposed on the cAdvisor\n# HTTP endpoint; use \"replacement: /api/v1/nodes/${1}:4194/proxy/metrics\"\n#
+    in that case (and ensure cAdvisor's HTTP server hasn't been disabled with\n# the
+    --cadvisor-port=0 Kubelet flag).\n- job_name: kubernetes-cadvisor\n  scrape_interval:
+    15s\n  scheme: https\n  tls_config:\n    ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt\n
+    \ bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token\n  kubernetes_sd_configs:\n
+    \ - role: node\n  relabel_configs:\n  - action: labelmap\n    regex: __meta_kubernetes_node_label_(.+)\n
+    \ - target_label: __address__\n    replacement: kubernetes.default.svc:443\n  -
+    source_labels: [__meta_kubernetes_node_name]\n    regex: (.+)\n    target_label:
+    __metrics_path__\n    replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor\n#
+    Node exporter\n- job_name: node-exporter\n  scheme: https\n  kubernetes_sd_configs:\n
+    \ - role: endpoints\n  bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token\n
+    \ tls_config:\n    insecure_skip_verify: true\n  relabel_configs:\n  # Scrape
+    only the the targets matching the following metadata\n  - source_labels: [__meta_kubernetes_namespace,
+    __meta_kubernetes_service_label_app, __meta_kubernetes_endpoint_port_name]\n    action:
+    keep\n    regex: knative-monitoring;node-exporter;https\n  # Rename metadata labels
+    to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n    action:
+    replace\n    regex: (.*)\n    target_label: namespace\n    replacement: $1\n  -
+    source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex: (.*)\n
+    \   target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1\n# Prometheus\n- job_name: prometheus\n  kubernetes_sd_configs:\n  - role:
+    endpoints\n  relabel_configs:\n  # Scrape only the the targets matching the following
+    metadata\n  - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app,
+    __meta_kubernetes_endpoint_port_name]\n    action: keep\n    regex: knative-monitoring;prometheus;web\n
+    \ # Rename metadata labels to be reader friendly\n  - source_labels: [__meta_kubernetes_namespace]\n
+    \   action: replace\n    regex: (.*)\n    target_label: namespace\n    replacement:
+    $1\n  - source_labels: [__meta_kubernetes_pod_name]\n    action: replace\n    regex:
+    (.*)\n    target_label: pod\n    replacement: $1\n  - source_labels: [__meta_kubernetes_service_name]\n
+    \   action: replace\n    regex: (.*)\n    target_label: service\n    replacement:
+    $1"
+kind: ConfigMap
 metadata:
-  name: zipkin
-  namespace: istio-system
-spec:
-  ports:
-  - name: http
-    port: 9411
-  selector:
-    app: zipkin
----
-apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  name: zipkin
-  namespace: istio-system
-spec:
-  replicas: 1
-  template:
-    metadata:
-      annotations:
-        sidecar.istio.io/inject: "false"
-      labels:
-        app: zipkin
-    spec:
-      containers:
-      - env:
-        - name: POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              apiVersion: v1
-              fieldPath: metadata.namespace
-        - name: STORAGE_TYPE
-          value: elasticsearch
-        - name: ES_HOSTS
-          value: elasticsearch-logging.monitoring.svc.cluster.local:9200
-        - name: ES_INDEX
-          value: zipkin
-        - name: ZIPKIN_UI_LOGS_URL
-          value: http://localhost:8001/api/v1/namespaces/monitoring/services/kibana-logging/proxy/app/kibana#/
-        image: docker.io/openzipkin/zipkin:latest
-        imagePullPolicy: IfNotPresent
-        name: zipkin
-        ports:
-        - containerPort: 9411
---- null
+  labels:
+    name: prometheus-scrape-config
+  name: prometheus-scrape-config
+  namespace: knative-monitoring
+
 ---
 apiVersion: v1
 kind: Service
@@ -16228,7 +15522,7 @@ metadata:
   labels:
     app: kube-controller-manager
   name: kube-controller-manager
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   clusterIP: None
   ports:
@@ -16239,6 +15533,7 @@ spec:
   selector:
     k8s-app: kube-controller-manager
   type: ClusterIP
+
 ---
 apiVersion: v1
 kind: Service
@@ -16246,7 +15541,7 @@ metadata:
   labels:
     app: prometheus
   name: prometheus-system-discovery
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   clusterIP: None
   ports:
@@ -16260,456 +15555,12 @@ spec:
   type: ClusterIP
 ---
 apiVersion: v1
-data:
-  prometheus.yml: |-
-    global:
-      scrape_interval: 30s
-      scrape_timeout: 10s
-      evaluation_interval: 30s
-    scrape_configs:
-    # Autoscaler endpoint
-    - job_name: autoscaler
-      scrape_interval: 3s
-      scrape_timeout: 3s
-      kubernetes_sd_configs:
-      - role: endpoints
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_service_label_serving_knative_dev_autoscaler]
-        action: keep
-        regex: .+
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: knative-serving;autoscaler-port
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Fluentd daemonset
-    - job_name: fluentd-ds
-      kubernetes_sd_configs:
-      - role: endpoints
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: monitoring;fluentd-ds;prometheus-metrics
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Istio mesh
-    - job_name: istio-mesh
-      scrape_interval: 5s
-      kubernetes_sd_configs:
-      - role: endpoints
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: istio-system;istio-telemetry;prometheus
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Istio Envoy
-    # These are very noisy and not enabled by default.
-    # - job_name: istio-envoy
-    #   scrape_interval: 5s
-    #   kubernetes_sd_configs:
-    #   - role: endpoints
-    #   relabel_configs:
-    #   # Scrape only the the targets matching the following metadata
-    #   - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
-    #     action: keep
-    #     regex: istio-system;istio-statsd-prom-bridge;statsd-prom
-    #   # Rename metadata labels to be reader friendly
-    #   - source_labels: [__meta_kubernetes_namespace]
-    #     action: replace
-    #     regex: (.*)
-    #     target_label: namespace
-    #     replacement: $1
-    #   - source_labels: [__meta_kubernetes_pod_name]
-    #     action: replace
-    #     regex: (.*)
-    #     target_label: pod
-    #     replacement: $1
-    #   - source_labels: [__meta_kubernetes_service_name]
-    #     action: replace
-    #     regex: (.*)
-    #     target_label: service
-    #     replacement: $1
-    # Istio policy
-    - job_name: istio-policy
-      scrape_interval: 5s
-      kubernetes_sd_configs:
-      - role: endpoints
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: istio-system;istio-policy;http-monitoring
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Istio telemetry
-    - job_name: istio-telemetry
-      scrape_interval: 5s
-      kubernetes_sd_configs:
-      - role: endpoints
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: istio-system;istio-telemetry;http-monitoring
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Istio pilot
-    - job_name: istio-pilot
-      scrape_interval: 5s
-      kubernetes_sd_configs:
-      - role: endpoints
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: istio-system;istio-pilot;http-monitoring
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Kube API server
-    - job_name: kube-apiserver
-      scheme: https
-      kubernetes_sd_configs:
-      - role: endpoints
-      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-      tls_config:
-        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-        server_name: kubernetes
-        insecure_skip_verify: false
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_component, __meta_kubernetes_service_label_provider, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: default;apiserver;kubernetes;https
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Kube controller manager
-    - job_name: kube-controller-manager
-      kubernetes_sd_configs:
-      - role: endpoints
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: monitoring;kube-controller-manager;http-metrics
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Kube scheduler
-    - job_name: kube-scheduler
-      kubernetes_sd_configs:
-      - role: endpoints
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_k8s_app, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: kube-system;kube-scheduler;http-metrics
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Kube state metrics on https-main port
-    - job_name: kube-state-metrics-https-main
-      honor_labels: true
-      scheme: https
-      kubernetes_sd_configs:
-      - role: endpoints
-      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-      tls_config:
-        insecure_skip_verify: true
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: monitoring;kube-state-metrics;https-main
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Kube state metrics on https-self port
-    - job_name: kube-state-metrics-https-self
-      scheme: https
-      kubernetes_sd_configs:
-      - role: endpoints
-      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-      tls_config:
-        insecure_skip_verify: true
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: monitoring;kube-state-metrics;https-self
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Kubelet - nodes
-    # Rather than connecting directly to the node, the scrape is proxied though the
-    # Kubernetes apiserver.  This means it will work if Prometheus is running out of
-    # cluster, or can't connect to nodes for some other reason (e.g. because of
-    # firewalling).
-    - job_name: kubernetes-nodes
-      scheme: https
-      tls_config:
-        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-      kubernetes_sd_configs:
-      - role: node
-      relabel_configs:
-      - action: labelmap
-        regex: __meta_kubernetes_node_label_(.+)
-      - target_label: __address__
-        replacement: kubernetes.default.svc:443
-      - source_labels: [__meta_kubernetes_node_name]
-        regex: (.+)
-        target_label: __metrics_path__
-        replacement: /api/v1/nodes/${1}/proxy/metrics
-    # Kubelet - cAdvisor
-    #
-    # This is required for Kubernetes 1.7.3 and later, where cAdvisor metrics
-    # (those whose names begin with 'container_') have been removed from the
-    # Kubelet metrics endpoint.  This job scrapes the cAdvisor endpoint to
-    # retrieve those metrics.
-    #
-    # In Kubernetes 1.7.0-1.7.2, these metrics are only exposed on the cAdvisor
-    # HTTP endpoint; use "replacement: /api/v1/nodes/${1}:4194/proxy/metrics"
-    # in that case (and ensure cAdvisor's HTTP server hasn't been disabled with
-    # the --cadvisor-port=0 Kubelet flag).
-    - job_name: kubernetes-cadvisor
-      scrape_interval: 15s
-      scheme: https
-      tls_config:
-        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-      kubernetes_sd_configs:
-      - role: node
-      relabel_configs:
-      - action: labelmap
-        regex: __meta_kubernetes_node_label_(.+)
-      - target_label: __address__
-        replacement: kubernetes.default.svc:443
-      - source_labels: [__meta_kubernetes_node_name]
-        regex: (.+)
-        target_label: __metrics_path__
-        replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
-    # Node exporter
-    - job_name: node-exporter
-      scheme: https
-      kubernetes_sd_configs:
-      - role: endpoints
-      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-      tls_config:
-        insecure_skip_verify: true
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: monitoring;node-exporter;https
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-    # Prometheus
-    - job_name: prometheus
-      kubernetes_sd_configs:
-      - role: endpoints
-      relabel_configs:
-      # Scrape only the the targets matching the following metadata
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_label_app, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: monitoring;prometheus;web
-      # Rename metadata labels to be reader friendly
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        regex: (.*)
-        target_label: namespace
-        replacement: $1
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        regex: (.*)
-        target_label: pod
-        replacement: $1
-      - source_labels: [__meta_kubernetes_service_name]
-        action: replace
-        regex: (.*)
-        target_label: service
-        replacement: $1
-kind: ConfigMap
-metadata:
-  labels:
-    name: prometheus-scrape-config
-  name: prometheus-scrape-config
-  namespace: monitoring
----
-apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: prometheus-system
@@ -16733,11 +15584,11 @@ rules:
   verbs:
   - get
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 rules:
 - apiGroups:
   - ""
@@ -16757,7 +15608,7 @@ rules:
   verbs:
   - get
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: prometheus-system
@@ -16774,7 +15625,7 @@ rules:
   - list
   - watch
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: prometheus-system
@@ -16799,11 +15650,11 @@ rules:
   verbs:
   - get
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 rules:
 - apiGroups:
   - ""
@@ -16829,7 +15680,7 @@ rules:
   verbs:
   - get
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: prometheus-system
@@ -16841,13 +15692,13 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -16855,9 +15706,9 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: prometheus-system
@@ -16869,9 +15720,9 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: prometheus-system
@@ -16883,9 +15734,9 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: prometheus-system
@@ -16896,13 +15747,13 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: prometheus-system-np
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   ports:
   - port: 8080
@@ -16915,7 +15766,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: prometheus-system
-  namespace: monitoring
+  namespace: knative-monitoring
 spec:
   podManagementPolicy: Parallel
   replicas: 2
@@ -16936,7 +15787,7 @@ spec:
         - --storage.tsdb.no-lockfile
         - --web.enable-lifecycle
         - --web.route-prefix=/
-        image: prom/prometheus:v2.2.1
+        image: prom/prometheus:v2.5.0
         imagePullPolicy: IfNotPresent
         livenessProbe:
           failureThreshold: 10
@@ -16978,209 +15829,5 @@ spec:
         name: prometheus-storage-volume
   updateStrategy:
     type: RollingUpdate
+
 ---
-apiVersion: config.istio.io/v1alpha2
-kind: logentry
-metadata:
-  name: requestlog
-  namespace: istio-system
-spec:
-  monitored_resource_type: '"UNSPECIFIED"'
-  severity: '"Info"'
-  timestamp: request.time
-  variables:
-    destinationConfiguration: destination.labels["serving.knative.dev/configuration"]
-      | "unknown"
-    destinationNamespace: destination.namespace | ""
-    destinationRevision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destinationService: destination.service | ""
-    latency: response.duration | "0ms"
-    method: request.method | ""
-    protocol: request.scheme | "http"
-    referer: request.referer | "unknown"
-    requestHost: request.host | ""
-    requestSize: request.size | 0
-    responseCode: response.code | 0
-    responseSize: response.size | 0
-    sourceNamespace: source.namespace | "unknown"
-    sourceService: source.service | "unknown"
-    traceId: request.headers["x-b3-traceid"] | "unknown"
-    url: request.path | ""
-    userAgent: request.useragent | "unknown"
----
-apiVersion: config.istio.io/v1alpha2
-kind: fluentd
-metadata:
-  name: requestloghandler
-  namespace: istio-system
-spec:
-  address: fluentd-ds.monitoring:24224
----
-apiVersion: config.istio.io/v1alpha2
-kind: rule
-metadata:
-  name: requestlogtofluentd
-  namespace: istio-system
-spec:
-  actions:
-  - handler: requestloghandler.fluentd
-    instances:
-    - requestlog.logentry
-  match: "true"
----
-apiVersion: config.istio.io/v1alpha2
-kind: metric
-metadata:
-  name: revisionrequestcount
-  namespace: istio-system
-spec:
-  dimensions:
-    destination_configuration: destination.labels["serving.knative.dev/configuration"]
-      | "unknown"
-    destination_namespace: destination.namespace | "unknown"
-    destination_revision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destination_service: destination.service | "unknown"
-    response_code: response.code | 200
-    source_service: source.service | "unknown"
-  monitored_resource_type: '"UNSPECIFIED"'
-  value: "1"
----
-apiVersion: config.istio.io/v1alpha2
-kind: metric
-metadata:
-  name: revisionrequestduration
-  namespace: istio-system
-spec:
-  dimensions:
-    destination_configuration: destination.labels["serving.knative.dev/configuration"]
-      | "unknown"
-    destination_namespace: destination.namespace | "unknown"
-    destination_revision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destination_service: destination.service | "unknown"
-    response_code: response.code | 200
-    source_service: source.service | "unknown"
-  monitored_resource_type: '"UNSPECIFIED"'
-  value: response.duration | "0ms"
----
-apiVersion: config.istio.io/v1alpha2
-kind: metric
-metadata:
-  name: revisionrequestsize
-  namespace: istio-system
-spec:
-  dimensions:
-    destination_configuration: destination.labels["serving.knative.dev/configuration"]
-      | "unknown"
-    destination_namespace: destination.namespace | "unknown"
-    destination_revision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destination_service: destination.service | "unknown"
-    response_code: response.code | 200
-    source_service: source.service | "unknown"
-  monitored_resource_type: '"UNSPECIFIED"'
-  value: request.size | 0
----
-apiVersion: config.istio.io/v1alpha2
-kind: metric
-metadata:
-  name: revisionresponsesize
-  namespace: istio-system
-spec:
-  dimensions:
-    destination_configuration: destination.labels["serving.knative.dev/configuration"]
-      | "unknown"
-    destination_namespace: destination.namespace | "unknown"
-    destination_revision: destination.labels["serving.knative.dev/revision"] | "unknown"
-    destination_service: destination.service | "unknown"
-    response_code: response.code | 200
-    source_service: source.service | "unknown"
-  monitored_resource_type: '"UNSPECIFIED"'
-  value: response.size | 0
----
-apiVersion: config.istio.io/v1alpha2
-kind: prometheus
-metadata:
-  name: revisionpromhandler
-  namespace: istio-system
-spec:
-  metrics:
-  - instance_name: revisionrequestcount.metric.istio-system
-    kind: COUNTER
-    label_names:
-    - source_service
-    - destination_namespace
-    - destination_service
-    - destination_revision
-    - destination_configuration
-    - response_code
-    name: revision_request_count
-  - buckets:
-      explicit_buckets:
-        bounds:
-        - 0.005
-        - 0.01
-        - 0.025
-        - 0.05
-        - 0.1
-        - 0.25
-        - 0.5
-        - 1
-        - 2.5
-        - 5
-        - 10
-    instance_name: revisionrequestduration.metric.istio-system
-    kind: DISTRIBUTION
-    label_names:
-    - source_service
-    - destination_namespace
-    - destination_service
-    - destination_revision
-    - destination_configuration
-    - response_code
-    name: revision_request_duration
-  - buckets:
-      exponentialBuckets:
-        growthFactor: 10
-        numFiniteBuckets: 8
-        scale: 1
-    instance_name: revisionrequestsize.metric.istio-system
-    kind: DISTRIBUTION
-    label_names:
-    - source_service
-    - destination_namespace
-    - destination_service
-    - destination_revision
-    - destination_configuration
-    - response_code
-    name: revision_request_size
-  - buckets:
-      exponentialBuckets:
-        growthFactor: 10
-        numFiniteBuckets: 8
-        scale: 1
-    instance_name: revisionresponsesize.metric.istio-system
-    kind: DISTRIBUTION
-    label_names:
-    - source_service
-    - destination_namespace
-    - destination_service
-    - destination_revision
-    - destination_configuration
-    - response_code
-    name: revision_response_size
----
-apiVersion: config.istio.io/v1alpha2
-kind: rule
-metadata:
-  labels:
-    istio-protocol: http
-  name: revisionpromhttp
-  namespace: istio-system
-spec:
-  actions:
-  - handler: revisionpromhandler.prometheus
-    instances:
-    - revisionrequestcount.metric
-    - revisionrequestduration.metric
-    - revisionrequestsize.metric
-    - revisionresponsesize.metric
---- null

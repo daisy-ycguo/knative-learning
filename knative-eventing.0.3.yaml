@@ -1,18 +1,20 @@
+
 ---
 # eventing.yaml
----
 apiVersion: v1
 kind: Namespace
 metadata:
   name: knative-eventing
+
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: eventing-controller
   namespace: knative-eventing
+
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: eventing-controller-admin
@@ -24,6 +26,7 @@ subjects:
 - kind: ServiceAccount
   name: eventing-controller
   namespace: knative-eventing
+
 ---
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
@@ -42,7 +45,10 @@ spec:
     - chan
     singular: channel
   scope: Namespaced
+  subresources:
+    status: {}
   version: v1alpha1
+
 ---
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
@@ -55,13 +61,17 @@ spec:
     - all
     - knative
     - eventing
+    - provisioner
     kind: ClusterChannelProvisioner
     plural: clusterchannelprovisioners
     shortNames:
     - ccp
     singular: clusterchannelprovisioner
   scope: Cluster
+  subresources:
+    status: {}
   version: v1alpha1
+
 ---
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
@@ -80,7 +90,28 @@ spec:
     - sub
     singular: subscription
   scope: Namespaced
+  subresources:
+    status: {}
   version: v1alpha1
+
+---
+apiVersion: v1
+data:
+  default-channel-config: |
+    clusterdefault:
+      apiversion: eventing.knative.dev/v1alpha1
+      kind: ClusterChannelProvisioner
+      name: in-memory-channel
+    namespacedefaults:
+      some-namespace:
+        apiversion: eventing.knative.dev/v1alpha1
+        kind: ClusterChannelProvisioner
+        name: some-other-provisioner
+kind: ConfigMap
+metadata:
+  name: default-channel-webhook
+  namespace: knative-eventing
+
 ---
 apiVersion: v1
 kind: Service
@@ -95,14 +126,18 @@ spec:
     targetPort: 443
   selector:
     role: webhook
+
 ---
-apiVersion: apps/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: eventing-controller
   namespace: knative-eventing
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: eventing-controller
   template:
     metadata:
       labels:
@@ -114,7 +149,7 @@ spec:
         - -stderrthreshold
         - INFO
         - --experimentalControllers=subscription.eventing.knative.dev
-        image: gcr.io/knative-releases/github.com/knative/eventing/cmd/controller@sha256:bfb8bf951f2ccead13e5d999f3c8e44a5c815f89eef03391aa061e19407bcd9b
+        image: gcr.io/knative-releases/github.com/knative/eventing/cmd/controller@sha256:ecefa8fb0de1bb69ddfc13a212424d4d09232dc566c3653810c20bbf3ef80aa7
         name: eventing-controller
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
@@ -125,14 +160,19 @@ spec:
       - configMap:
           name: config-logging
         name: config-logging
+
 ---
-apiVersion: apps/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: webhook
   namespace: knative-eventing
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: webhook
+      role: webhook
   template:
     metadata:
       annotations:
@@ -142,7 +182,7 @@ spec:
         role: webhook
     spec:
       containers:
-      - image: gcr.io/knative-releases/github.com/knative/eventing/cmd/webhook@sha256:0c8e6180481663045088cebea41cfbf92ef590da748b92bed77a8c0dc2539bff
+      - image: gcr.io/knative-releases/github.com/knative/eventing/cmd/webhook@sha256:3391e2dfc6461261be18739adcddaf69ba8e5643d1ebfac3b7b6a80c9907104c
         name: webhook
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
@@ -153,6 +193,7 @@ spec:
       - configMap:
           name: config-logging
         name: config-logging
+
 ---
 apiVersion: v1
 data:
@@ -183,9 +224,10 @@ kind: ConfigMap
 metadata:
   name: config-logging
   namespace: knative-eventing
+
+---
 ---
 # in-memory-channel.yaml
----
 apiVersion: eventing.knative.dev/v1alpha1
 kind: ClusterChannelProvisioner
 metadata:
@@ -207,6 +249,7 @@ rules:
   - eventing.knative.dev
   resources:
   - channels
+  - channels/status
   - clusterchannelprovisioners
   verbs:
   - get
@@ -232,6 +275,20 @@ rules:
 - apiGroups:
   - ""
   resourceNames:
+  - in-memory-channel-clusterbus
+  resources:
+  - services
+  verbs:
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - update
+- apiGroups:
+  - ""
+  resourceNames:
   - in-memory-channel-dispatcher-config-map
   resources:
   - configmaps
@@ -246,8 +303,9 @@ rules:
   - list
   - watch
   - create
+  - update
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: in-memory-channel-controller
@@ -261,7 +319,7 @@ subjects:
   name: in-memory-channel-controller
   namespace: knative-eventing
 ---
-apiVersion: apps/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: in-memory-channel-controller
@@ -279,7 +337,7 @@ spec:
         role: controller
     spec:
       containers:
-      - image: gcr.io/knative-releases/github.com/knative/eventing/pkg/controller/eventing/inmemory/controller@sha256:cbc86e2faa593cdd34c2ed54fd171fcbed4bfa26017c1e7db554c584162a8846
+      - image: gcr.io/knative-releases/github.com/knative/eventing/pkg/controller/eventing/inmemory/controller@sha256:6452c0ecc6099c5a7a6b9f94763c982ec77ed5c9e560619362a8573629dc67dd
         name: controller
       serviceAccountName: in-memory-channel-controller
 ---
@@ -304,7 +362,7 @@ rules:
   - list
   - watch
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: in-memory-channel-dispatcher
@@ -318,7 +376,7 @@ subjects:
   name: in-memory-channel-dispatcher
   namespace: knative-eventing
 ---
-apiVersion: apps/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: in-memory-channel-dispatcher
@@ -343,6 +401,8 @@ spec:
         - --config_map_noticer=watcher
         - --config_map_namespace=knative-eventing
         - --config_map_name=in-memory-channel-dispatcher-config-map
-        image: gcr.io/knative-releases/github.com/knative/eventing/cmd/fanoutsidecar@sha256:b57a317067d9a4299f08f6b05f161e50c8ac9b5e2cca812c41a938ad8b12ab38
+        image: gcr.io/knative-releases/github.com/knative/eventing/cmd/fanoutsidecar@sha256:a1c331166249dd82d78dffb26ad89e9c592a13a88b9283ab2a2603629579e3ef
         name: dispatcher
       serviceAccountName: in-memory-channel-dispatcher
+
+---

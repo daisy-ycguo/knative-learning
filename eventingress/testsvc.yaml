@@ -1,0 +1,16 @@
+apiVersion: serving.knative.dev/v1alpha1 # Current version of Knative
+kind: Service
+metadata:
+  name: myingress-test # The name of the app
+  namespace: default # The namespace the app will use
+spec:
+  runLatest:
+    configuration:
+      revisionTemplate:
+        spec:
+          container:
+            image: index.docker.io/daisyycguo/cloudeventingress-1c407870ee3bf9e4aa7ec0f56c308dce@sha256:9bb12f11bb7f3152a3ae609e8eadfab00a36f1e8b373bc20c23e0c5dd93d72a2 # The URL to the image of the app
+            env:
+            - name: SINK_URI # The environment variable printed out by the sample app
+              value: http://testchannel-channel-z6svk.default.svc.cluster.local/
+
